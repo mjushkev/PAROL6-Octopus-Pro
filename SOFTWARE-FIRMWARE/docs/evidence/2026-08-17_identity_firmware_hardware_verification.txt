@@ -1,0 +1,34 @@
+PAROL6 H723 identity firmware hardware verification
+Date: 2026-08-17 America/Toronto
+Operator: Codex with owner performing the documented physical microSD/USB actions
+Power state: USB-only; owner previously confirmed 24 V inputs and ESP disconnected
+
+Bootloader update evidence:
+  Input card file: firmware.bin
+  Result card file: FIRMWARE.CUR
+  Result size: 28244 bytes
+  Result SHA-256: 25A16D997590C00BC158DF40061970802BEBB5B8A1845C57A2F8734748FC94BD
+  Interpretation: the BTT SD bootloader accepted the image and retained the recovery path.
+
+Windows enumeration after update:
+  Status: OK
+  Friendly name: USB Serial Device (COM4)
+  Instance ID: USB\VID_0483&PID_5740\365834603233
+  Bus-reported description: PAROL6 H723 Safe Identity
+  Driver: Microsoft 10.0.26100.8972
+
+IDENTIFY response:
+  PAROL6_IDENTIFY product=PAROL6 firmware=safe_identity version=0.1.0-identity board=BTT_OCTOPUS_PRO_V1_1_H723ZE mcu=STM32H723ZE transport=usb_cdc outputs=disabled motion=disabled
+
+STATUS response:
+  PAROL6_STATUS mode=identity_only outputs=disabled motion=disabled actuator_power=required_off accepted=3 rejected=0
+
+Fail-closed probe:
+  Sent line: MOVE
+  Response: PAROL6_ERROR code=command_rejected outputs=disabled motion=disabled
+
+Result:
+  PASS: USB CDC identity milestone installed and responsive.
+  PASS: installed image reports outputs disabled and motion disabled.
+  PASS: an unsupported motion-like command is rejected.
+  PROHIBITED: 24 V, actuator power, homing, and motion remain blocked by the physical hardware gates.

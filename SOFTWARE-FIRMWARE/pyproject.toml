@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parol6-mattj-controller"
+version = "0.1.0.dev0"
+description = "Simulation-first protocol and controller stack for Matt J's PAROL6"
+requires-python = ">=3.12"
+license = { text = "GPL-3.0-or-later" }
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["shared/protocol", "windows/parol6_backend"]
+include = ["parol6_protocol*", "parol6_backend*"]
+

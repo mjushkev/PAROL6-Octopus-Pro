@@ -1,0 +1,43 @@
+PAROL6 Octopus H723 identity-only firmware build evidence
+Date: 2026-08-17 America/Toronto
+
+Target:
+  Board: BIGTREETECH Octopus Pro V1.1
+  MCU target: STM32H723ZET6
+  Declared flash: 512 KiB
+  Bootloader reservation: 128 KiB
+  Application vector: 0x08020000
+  USB: CDC through USB HS peripheral in full-speed mode on PA11/PA12
+
+Pinned build inputs:
+  PlatformIO Core: 6.1.19
+  PlatformIO ST STM32 platform: 19.7.1
+  STM32duino framework package: 4.21200.0 (upstream 2.12.0)
+  GCC Arm package: 1.120301.0 (compiler 12.3.1)
+
+Verification results:
+  PlatformIO build: PASS
+  ELF .isr_vector address: 0x08020000 PASS
+  Application GPIO-output API scan: PASS
+  Compile-time command parser assertions: PASS
+  RAM: 6972 / 327680 bytes (2.1%)
+  Flash: 27496 / 524288 bytes (5.2%; PlatformIO reports against total MCU flash)
+  Clean-build reproducibility: PASS, two consecutive hashes identical
+
+Artifact:
+  Path: dist/octopus-h723-identity-0.1.0/firmware.bin
+  Size: 28244 bytes
+  SHA-256: 25A16D997590C00BC158DF40061970802BEBB5B8A1845C57A2F8734748FC94BD
+
+Safety properties of application source:
+  - Initializes USB CDC only.
+  - Configures no application GPIO output.
+  - Initializes no motor, driver, heater, fan, relay, servo, UART, ADC, or SD peripheral.
+  - Accepts only IDENTIFY, STATUS, and HELP.
+  - Rejects MOVE and every other non-empty line.
+  - Every response states outputs=disabled and motion=disabled.
+
+Physical state:
+  Build and packaging complete.
+  Flash not yet performed at the time of this record.
+  Post-flash COM identity response pending.

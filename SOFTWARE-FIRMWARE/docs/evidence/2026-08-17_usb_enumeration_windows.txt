@@ -1,0 +1,22 @@
+PAROL6 USB logic enumeration evidence
+Date: 2026-08-17 America/Toronto
+Physical action: Owner connected the Octopus Pro USB-C device port to the Windows PC.
+Observation method: Read-only Windows Get-PnpDevice and Get-PnpDeviceProperty queries run by Codex.
+No serial bytes were transmitted. No firmware was flashed. No motion was requested.
+
+Status: OK
+Class: Ports
+Friendly name: USB Serial Device (COM4)
+Instance ID: USB\VID_0483&PID_5740\365834603233
+Hardware IDs:
+  USB\VID_0483&PID_5740&REV_0200
+  USB\VID_0483&PID_5740
+Bus-reported device description: OCTOPUS_PRO_V1_1_H723 CDC in FS Mode
+Driver provider: Microsoft
+Driver version: 10.0.26100.8972
+
+Interpretation:
+- PASS: the PC-to-Octopus USB data path enumerates as a virtual serial port.
+- PASS: the device descriptor identifies an Octopus Pro V1.1 H723 target.
+- NOT PROVEN: physical board markings, schematic continuity, jumper correctness,
+  installed application-firmware identity, output state, or motion readiness.

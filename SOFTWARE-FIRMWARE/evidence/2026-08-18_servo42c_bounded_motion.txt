@@ -1,0 +1,21 @@
+PAROL6 Servo42C bounded motion verification
+Date: 2026-08-18
+Controller: BTT Octopus Pro V1.1 H723 on COM4
+Firmware: 0.5.1-servo-pushpull
+Firmware SHA-256: 344A02FE5A5C2D210FAA70CFD0B8C80E5661BE6D1AA3314A3E5B05B9CCAEDA99
+Signal mode: 3.3 V push-pull through the supplied Pololu-format Servo42C adapters
+Servo42C mode: CR_vFOC, 32 microsteps, enable active low
+
+J1 command result:
+PAROL6_JOG joint=J1 direction=+ degrees=1 result=complete driver_disabled=1 status=0x0
+Servo42C display after command: 114clk
+Owner observation: joint physically moved successfully
+
+J2 command result:
+PAROL6_JOG joint=J2 direction=+ degrees=1 result=complete driver_disabled=1 status=0x0
+Expected pulse count: 356
+Owner observation: success
+
+Scope: These results verify only bounded positive-direction motion and pulse
+delivery. They do not verify reverse direction, calibration, homing, full
+travel, load capacity, thermal behavior, or output-joint accuracy.

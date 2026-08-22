@@ -1,0 +1,46 @@
+PAROL6 H723 output-disabled safe-core build evidence
+Date: 2026-08-17 America/Toronto
+Physical action: NONE; image was built and packaged but not flashed
+
+Target:
+  Board: BTT Octopus Pro V1.1 H723ZE
+  MCU: STM32H723ZET6
+  Application vector: 0x08020000
+  Physical flash end checked: 0x08080000
+  Toolchain: PlatformIO 6.1.19, ststm32 19.7.1,
+             STM32duino 2.12.0, GCC Arm 12.3.1
+
+Firmware:
+  Version: 0.2.0-safe-core
+  Binary size: 30392 bytes
+  SHA-256: 25B176BA79B029E0D82FD4489A94DA84D734C8C08BA25A0DC1DFB9478F5BA2E4
+  Flash usage: 29644 / 524288 bytes reported by PlatformIO
+  RAM usage: 7280 / 327680 bytes
+  Two clean build hashes: MATCH
+
+Static/build verification:
+  PASS: .isr_vector is 0x08020000
+  PASS: allocated/load sections remain within STM32H723ZE physical flash
+  PASS: application GPIO-output APIs absent
+  PASS: HAL_IWDG_Init and HAL_IWDG_Refresh linked
+  PASS: config selection/corruption/unsafe-output static assertions
+  PASS: 32-entry event-ring rollover static assertion
+  PASS: 300 ms heartbeat timeout forces safe outputs
+  PASS: MOVE and MOTOR_ENABLE rejected by parser assertions
+
+Repository tests:
+  33 tests passed
+
+Implemented boundary:
+  Independent watchdog: nominal 2 seconds, hardware result reported at runtime
+  Control heartbeat timeout: 300 ms
+  Configuration: dual-slot CRC selection algorithm; flash adapter not connected
+  Event log: bounded RAM ring; nonvolatile adapter not connected
+  USB commands: IDENTIFY, STATUS, HEARTBEAT, DIAGNOSTICS, HELP
+  GPIO/motor/relay/PWM/actuator outputs: not implemented
+
+Result:
+  PASS: deterministic output-disabled artifact prepared.
+  NOT VERIFIED: post-flash USB behavior and watchdog reset timing.
+  PROHIBITED: flashing without explicit owner authorization; 24 V, actuator
+              power, homing, and motion remain blocked.

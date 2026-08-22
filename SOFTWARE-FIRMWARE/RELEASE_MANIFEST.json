@@ -1,0 +1,37 @@
+{
+  "status": "development-output-disabled",
+  "release_ready": false,
+  "protocol_version": "1.0",
+  "hardware_outputs_enabled": false,
+  "artifacts": [
+    {
+      "name": "octopus_h723_identity_0.1.0",
+      "path": "dist/octopus-h723-identity-0.1.0/firmware.bin",
+      "sha256": "25A16D997590C00BC158DF40061970802BEBB5B8A1845C57A2F8734748FC94BD",
+      "hardware_outputs_enabled": false,
+      "motion_capable": false,
+      "post_flash_usb_verified": true
+    },
+    {
+      "name": "octopus_h723_safe_core_0.2.0",
+      "path": "dist/octopus-h723-safe-core-0.2.0/firmware.bin",
+      "sha256": "25B176BA79B029E0D82FD4489A94DA84D734C8C08BA25A0DC1DFB9478F5BA2E4",
+      "hardware_outputs_enabled": false,
+      "motion_capable": false,
+      "post_flash_usb_verified": true
+    },
+    {
+      "name": "octopus_h723_service_core_0.3.0",
+      "path": "dist/octopus-h723-service-core-0.3.0/firmware.bin",
+      "sha256": "3C176B9D75EE10711DB818E37B65F547089A30EC7E5BB4EE4096DB0ADB1B4FB1",
+      "hardware_outputs_enabled": false,
+      "motion_capable": false,
+      "post_flash_usb_verified": false
+    }
+  ],
+  "blockers": [
+    "HV-01 through HV-08 are incomplete",
+    "No H723 motion firmware or ESP firmware has passed hardware-in-loop verification",
+    "Offline Windows installer has not been built"
+  ]
+}

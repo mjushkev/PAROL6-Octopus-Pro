@@ -1,0 +1,41 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python and protocol tests
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: SOFTWARE-FIRMWARE
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run test suite
+        shell: pwsh
+        run: .\scripts\test-all.ps1
+
+  wiring-app:
+    name: Wiring app
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: SOFTWARE-FIRMWARE/wiring-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: SOFTWARE-FIRMWARE/wiring-app/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test

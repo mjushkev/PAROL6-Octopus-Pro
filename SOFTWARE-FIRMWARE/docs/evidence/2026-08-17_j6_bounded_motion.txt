@@ -1,0 +1,27 @@
+PAROL6 J6 bounded motion evidence
+Date: 2026-08-17
+Board: BTT Octopus Pro V1.1 STM32H723ZE on COM4
+Driver: BTT TMC2209 V1.3 in MOTOR5, UART address 0
+
+Firmware identity:
+PAROL6_J6_DIAG_READY version=0.4.2-j6-diag axis=J6 motor_slot=MOTOR5 current_ma=250 microsteps=16 max_pulses=1600 one_jog_per_boot=1 driver_disabled=1
+
+Preflight:
+PAROL6_J6_DRIVER ready=1 connection=0 version=0x21 status=0xC01D0000 current_ma=250 driver_disabled=1
+
+Command envelope:
+direction=+, pulses=1600, rate=500 pulses/s, one jog per boot
+
+Post-command logic check:
+PAROL6_J6_DIAG_READY version=0.4.2-j6-diag axis=J6 motor_slot=MOTOR5 current_ma=250 microsteps=16 max_pulses=1600 one_jog_per_boot=1 driver_disabled=1
+PAROL6_J6_DRIVER ready=1 connection=0 version=0x21 status=0xC0020000 current_ma=250 driver_disabled=1
+
+Physical observation supplied by owner in the task conversation:
+"it rotated perfectly"
+
+Notes:
+- The host's original three-second read timeout expired just before the
+  3.2-second jog response; identity/preflight immediately afterward confirmed
+  the controller remained responsive and the driver was disabled.
+- This proves only the observed bounded J6 direction test. It does not prove
+  calibrated direction, homing polarity, full-range motion, or another axis.

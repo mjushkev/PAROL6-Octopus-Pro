@@ -1,0 +1,42 @@
+{
+  "build": {
+    "arduino": {
+      "variant_h": "variant_generic.h"
+    },
+    "core": "stm32",
+    "cpu": "cortex-m7",
+    "extra_flags": "-DSTM32H7 -DSTM32H7xx -DSTM32H723xx",
+    "f_cpu": "550000000L",
+    "flash_offset": "0x20000",
+    "mcu": "stm32h723zet6",
+    "product_line": "STM32H723xx",
+    "variant": "STM32H7xx/H723Z(E-G)T_H730ZBT_H733ZGT"
+  },
+  "debug": {
+    "jlink_device": "STM32H723ZE",
+    "openocd_target": "stm32h7x",
+    "svd_path": "STM32H723.svd"
+  },
+  "frameworks": [
+    "arduino",
+    "stm32cube"
+  ],
+  "name": "BTT Octopus Pro V1.1 STM32H723ZE (identity-only)",
+  "upload": {
+    "maximum_ram_size": 327680,
+    "maximum_size": 524288,
+    "offset_address": "0x08020000",
+    "protocol": "stlink",
+    "protocols": [
+      "stlink",
+      "dfu",
+      "jlink",
+      "cmsis-dap"
+    ],
+    "require_upload_port": true,
+    "use_1200bps_touch": false,
+    "wait_for_upload_port": false
+  },
+  "url": "https://github.com/bigtreetech/BIGTREETECH-OCTOPUS-Pro",
+  "vendor": "BIGTREETECH"
+}

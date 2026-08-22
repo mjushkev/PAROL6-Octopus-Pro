@@ -1,0 +1,9 @@
+schema_version: 1
+hardware_outputs_enabled: false
+motor_contactor_enabled: false
+step_outputs_enabled: false
+driver_enables_active: false
+gripper_pwm_enabled: false
+required_gates: [HV-01, HV-02, HV-03, HV-04, HV-05, HV-06, HV-07, HV-08]
+gate_policy: fail_closed
+

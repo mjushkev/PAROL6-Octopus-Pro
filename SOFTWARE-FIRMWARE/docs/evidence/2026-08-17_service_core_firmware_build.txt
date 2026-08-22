@@ -1,0 +1,56 @@
+PAROL6 H723 service-core offline build evidence
+Date: 2026-08-17
+Environment: octopus_h723_service_core
+Version: 0.3.0-service-core
+Hardware touched: no
+Physical flash performed: no
+Installed board image remains: 0.2.0-safe-core
+
+Pinned build inputs
+- PlatformIO: 6.1.19
+- ststm32 platform: 19.7.1
+- STM32duino framework: 2.12.0
+- GCC Arm Embedded: 12.3.1
+- MCU target: STM32H723ZET6
+
+Flash layout enforced
+- BTT bootloader sector 0: 0x08000000..0x0801FFFF
+- Application sector 1: 0x08020000..0x0803FFFF
+- Persistent slot A sector 2: 0x08040000..0x0805FFFF
+- Persistent slot B sector 3: 0x08060000..0x0807FFFF
+- Linker map FLASH: origin 0x08020000, length 0x00020000
+- ELF verifier: vector 0x08020000; no section crosses 0x08040000
+
+Safety/static verification
+- Application GPIO-output API verifier: PASS
+- HAL IWDG initialization/refresh symbols: PRESENT
+- HAL flash program/erase symbols: PRESENT
+- Binary protocol decoder symbol: PRESENT
+- Application motion/power output APIs: ABSENT
+- Output and motion capability: COMPILED OUT
+
+Protocol/storage verification
+- Checked-in golden UART vector runtime self-test: PRESENT
+- CRC32C check value and 64-frame replay runtime self-tests: PRESENT
+- Fixed response payload sizes: 28/64/8 bytes
+- Config/event records: 32 bytes and 32-byte aligned
+- H7 data-cache lines are invalidated after storage program/erase before reads
+- Persistent config/event sequences roll over to 1 rather than reserved zero
+- CRC-corrupt and unsafe configs: rejected by compile-time tests
+- Interrupted erase/program/commit recovery model: PASS
+- Python unit/integration suite: 44 tests PASS
+- Physical internal-flash and USB HIL: NOT RUN; explicit authorization required
+
+Build result (two clean builds)
+- Build 1 SHA-256: 3C176B9D75EE10711DB818E37B65F547089A30EC7E5BB4EE4096DB0ADB1B4FB1
+- Build 2 SHA-256: 3C176B9D75EE10711DB818E37B65F547089A30EC7E5BB4EE4096DB0ADB1B4FB1
+- Reproducibility: PASS
+- firmware.bin size: 41,292 bytes
+- linked flash usage: 40,520 bytes
+- RAM usage: 19,928 bytes
+- Packaged artifact: dist/octopus-h723-service-core-0.3.0/firmware.bin
+
+Conclusion
+The output-disabled service-core image is reproducibly built and packaged for
+a later authorized USB-only installation. It has not been flashed or verified
+on COM4. It does not authorize 24 V, actuator power, or motion.

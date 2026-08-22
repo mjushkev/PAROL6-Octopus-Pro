@@ -1,0 +1,16 @@
+PAROL6 USB passive serial capture evidence
+Date: 2026-08-17 America/Toronto
+Operator: Codex, after owner confirmed COM4 ready under USB-only power
+Method: Open COM4 at 3,000,000 baud with DTR disabled, RTS disabled, and no handshake; listen for 10 seconds.
+
+Device: USB Serial Device (COM4)
+Instance ID: USB\VID_0483&PID_5740\365834603233
+Capture duration: 10 seconds
+Transmitted bytes: 0
+Received bytes: 0
+
+Interpretation:
+- PASS: COM4 can be opened for passive observation.
+- INCONCLUSIVE: no unsolicited startup banner or telemetry was observed.
+- NOT PROVEN: identity or safety properties of the application firmware already installed.
+- No commands were sent, no firmware was flashed, and no motion was requested.

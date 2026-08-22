@@ -1,0 +1,45 @@
+name: Bug report
+description: Report a reproducible software, firmware, or documentation problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Remove actuator power before investigating any unexpected motion. Do not post secrets or private identifiers."
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Host software
+        - Octopus firmware
+        - Wiring app
+        - Mechanical files or documentation
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: "Commit SHA and firmware version, if applicable"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include the expected result, actual result, and minimal reproduction.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      render: shell
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed actuator power before investigating unexpected physical behavior.
+          required: true

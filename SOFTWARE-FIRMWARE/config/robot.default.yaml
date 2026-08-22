@@ -1,0 +1,16 @@
+schema_version: 1
+robot_id: UNASSIGNED
+commissioned: false
+simulation_only: true
+joint_reductions: [6.4, 20.0, 18.0952381, 4.0, 4.0, 10.0]
+logical_microsteps: 32
+servo42c:
+  mode: CR_OPEN
+  encoder_integration: disabled
+  telemetry: disabled
+hardware_values:
+  directions: UNVERIFIED
+  home_polarities: UNVERIFIED
+  home_offsets: UNVERIFIED
+  soft_limits: UNVERIFIED
+  standby_pose: UNVERIFIED

@@ -1,0 +1,58 @@
+from enum import IntEnum
+
+
+class ControllerState(IntEnum):
+    BOOT_SELF_TEST = 0
+    NOT_COMMISSIONED = 1
+    DISARMED = 2
+    ARMING = 3
+    UNHOMED = 4
+    HOMING = 5
+    READY = 6
+    EXECUTING = 7
+    HOLDING = 8
+    PROTECTIVE_STOP = 9
+    ESTOP_LATCHED = 10
+    FAULT_LATCHED = 11
+    UPDATE_MODE = 12
+
+
+class MessageType(IntEnum):
+    HELLO = 1
+    TAKE_CONTROL = 2
+    RELEASE_CONTROL = 3
+    HEARTBEAT = 4
+    HEARTBEAT_REPLY = 5
+    GET_DEVICE_INFO = 6
+    MOTOR_ENABLE = 16
+    MOTOR_OFF = 17
+    CONTROLLED_STOP = 18
+    RESET_FAULT = 19
+    HOME_START = 32
+    HOME_CANCEL = 33
+    TRAJECTORY_BEGIN = 48
+    TRAJECTORY_POINTS = 49
+    TRAJECTORY_COMMIT = 50
+    TRAJECTORY_CANCEL = 51
+    GRIPPER_SET = 64
+    IO_WRITE = 65
+    STATUS_FAST = 80
+    STATUS_SLOW = 81
+    EVENT = 82
+    NACK = 127
+
+
+class ErrorCode(IntEnum):
+    OK = 0
+    MALFORMED = 1
+    BAD_VERSION = 2
+    BAD_CRC = 3
+    REPLAY = 4
+    NOT_AUTHENTICATED = 5
+    NO_CONTROL_LEASE = 6
+    INVALID_STATE = 7
+    NOT_COMMISSIONED = 8
+    OUT_OF_RANGE = 9
+    QUEUE_FULL = 10
+    STALE = 11
+

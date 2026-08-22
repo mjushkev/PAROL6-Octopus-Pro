@@ -1,0 +1,43 @@
+PAROL6 H723 output-disabled safe-core hardware verification
+Date: 2026-08-17 America/Toronto
+Operator: Codex with owner performing the documented physical microSD/USB actions
+Power state: USB-only; 24 V and actuator power required absent
+
+Bootloader update evidence:
+  Result card file: FIRMWARE.CUR
+  Result size: 30392 bytes
+  Result SHA-256: 25B176BA79B029E0D82FD4489A94DA84D734C8C08BA25A0DC1DFB9478F5BA2E4
+  Result: PASS; BTT SD bootloader accepted the locked safe-core image.
+
+Windows enumeration after update:
+  Status: OK
+  Friendly name: USB Serial Device (COM4)
+  Instance ID: USB\VID_0483&PID_5740\365834603233
+  Bus-reported description: PAROL6 H723 Safe Core
+  Driver: Microsoft 10.0.26100.8972
+
+IDENTIFY response:
+  PAROL6_IDENTIFY product=PAROL6 firmware=safe_core version=0.2.0-safe-core board=BTT_OCTOPUS_PRO_V1_1_H723ZE mcu=STM32H723ZE transport=usb_cdc outputs=disabled motion=disabled
+
+STATUS response:
+  PAROL6_STATUS mode=safe_core state=not_commissioned fault=none outputs=disabled motion=disabled actuator_power=required_off accepted=2 rejected=0
+
+DIAGNOSTICS response:
+  PAROL6_DIAGNOSTICS config_valid=1 config_slot=0 config_sequence=1 event_count=2 event_total=2 heartbeat_timeout_ms=300 hardware_watchdog_ms=2000 hardware_watchdog_ready=1 config_storage=algorithm_only event_storage=ram_only outputs=disabled motion=disabled
+
+HEARTBEAT response:
+  PAROL6_HEARTBEAT_REPLY state=not_commissioned outputs=disabled motion=disabled
+
+Fail-closed probe:
+  Sent line: MOVE
+  Response: PAROL6_ERROR code=command_rejected outputs=disabled motion=disabled
+
+Result:
+  PASS: safe-core firmware installed and responsive on COM4.
+  PASS: hardware watchdog initialization reported ready.
+  PASS: safe factory configuration selected and controller remains NOT_COMMISSIONED.
+  PASS: outputs and motion remain disabled; MOVE rejected.
+  NOT VERIFIED: deliberate watchdog-reset timing, nonvolatile config/log adapters,
+                canonical binary protocol, GPIO inputs, ADC, and output timing.
+  PROHIBITED: 24 V, actuator power, homing, and motion remain blocked by the
+              physical hardware gates.

@@ -1,0 +1,46 @@
+# Local work and downloaded toolchains
+/tmp/
+/.agents/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+*.egg-info/
+
+# PlatformIO and compiled firmware
+.pio/
+*.bin
+*.elf
+*.hex
+*.map
+
+# Node / web app
+node_modules/
+.next/
+.vinext/
+dist/
+.wrangler/
+coverage/
+.source-octopus/
+*.tsbuildinfo
+.sites-dev.*.log
+
+# Generated packages and caches
+.cache/
+*.tar.gz
+
+# Local secrets and editor files
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.user
+*.suo

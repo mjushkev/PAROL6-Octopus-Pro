@@ -1,0 +1,58 @@
+{
+  "schema": "protocol_v1",
+  "protocol": {
+    "major": 1,
+    "minor": 0,
+    "byte_order": "little"
+  },
+  "vectors": [
+    {
+      "name": "vector_0_heartbeat",
+      "fields": {
+        "version": 256,
+        "message_type": 4,
+        "flags": 0,
+        "payload_hex": "",
+        "session_id": 0,
+        "sequence": 0,
+        "acknowledgement": 0,
+        "sender_time_us": 0
+      },
+      "body_hex": "0001040000000000000000000000000000000000000000000000d1f5451c",
+      "uart_hex": "010301040101010101010101010101010101010101010101010105d1f5451c00",
+      "tcp_hex": "1e0000000001040000000000000000000000000000000000000000000000d1f5451c"
+    },
+    {
+      "name": "vector_1_hello",
+      "fields": {
+        "version": 256,
+        "message_type": 1,
+        "flags": 165,
+        "payload_hex": "5041524f4c36004d4154544a",
+        "session_id": 287454020,
+        "sequence": 16909060,
+        "acknowledgement": 84281096,
+        "sender_time_us": 72623859790382856
+      },
+      "body_hex": "000101a50c0044332211040302010807060508070605040302015041524f4c36004d4154544adf3c42c4",
+      "uart_hex": "01050101a50c1b44332211040302010807060508070605040302015041524f4c360a4d4154544adf3c42c400",
+      "tcp_hex": "2a000000000101a50c0044332211040302010807060508070605040302015041524f4c36004d4154544adf3c42c4"
+    },
+    {
+      "name": "vector_2_trajectory_commit",
+      "fields": {
+        "version": 256,
+        "message_type": 50,
+        "flags": 0,
+        "payload_hex": "efcdab8967452301",
+        "session_id": 7,
+        "sequence": 99,
+        "acknowledgement": 98,
+        "sender_time_us": 1000000
+      },
+      "body_hex": "00013200080007000000630000006200000040420f0000000000efcdab896745230129f09f08",
+      "uart_hex": "0103013202080207010102630101026201010440420f010101010defcdab896745230129f09f0800",
+      "tcp_hex": "2600000000013200080007000000630000006200000040420f0000000000efcdab896745230129f09f08"
+    }
+  ]
+}
