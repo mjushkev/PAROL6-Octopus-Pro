@@ -194,7 +194,7 @@ button { font: inherit; }
   .safety-panel, .home-sequence-card, .calibration-summary { align-items: flex-start; flex-direction: column; }.home-sequence-actions { width: 100%; flex-direction: column; }.motion-toolbar, .motion-joint-grid, .program-grid { grid-template-columns: 1fr; }.home-row { grid-template-columns: 1fr 1fr; }.home-row > div { grid-column: 1 / -1; }.home-row.locked { grid-template-columns: 1fr; }.home-row.locked b { text-align: left; }.calibration-selects { grid-template-columns: 1fr; }
 }
 
-/* Simplified 0.8.1 joint commissioning workbench */
+/* Simplified 0.8.2 joint commissioning workbench */
 .simple-app { min-height: 100vh; padding-bottom: 56px; background: radial-gradient(circle at 50% -20%, #1b3040 0, transparent 36%), #080d13; color: #edf4f8; }
 .simple-app button, .simple-app select, .simple-app input { font: inherit; }
 .simple-app button { cursor: pointer; }
@@ -220,3 +220,8 @@ button { font: inherit; }
 @media (max-width: 850px) {
   .simple-header { align-items: flex-start; flex-direction: column; }.simple-header-actions { width: 100%; }.simple-header-actions button { flex: 1; }.simple-status { grid-template-columns: 1fr; gap: 4px; }.simple-controlbar, .finish-bar { align-items: stretch; flex-direction: column; }.simple-controlbar button { width: 100%; }.joint-tabs { grid-template-columns: repeat(3, 1fr); }.joint-workbench-head { align-items: flex-start; flex-direction: column; }.live-readouts { width: 100%; }.live-readouts > div { flex: 1; }.simple-step-grid { grid-template-columns: 1fr; }.simple-step-grid article.wide { grid-column: auto; }.jog-settings { grid-template-columns: 1fr; }.jog-controls { grid-template-columns: 1fr 1fr; }.limit-capture { grid-template-columns: 1fr; }.finish-bar > div:last-child { flex-direction: column; }
 }
+
+.manual-home { padding: 14px; border: 1px solid #9b7436; border-radius: 10px; background: #21190d; }
+.manual-home > strong { color: #f0c56d; font: 850 9px var(--font-geist-mono); letter-spacing: .12em; }
+.manual-home ol { margin: 10px 0 0; padding-left: 19px; color: #c9b98e; font-size: 11px; line-height: 1.7; }
+.manual-home small { display: block; margin-top: 9px; color: #a58f67; font-size: 9px; line-height: 1.45; }

@@ -42,7 +42,7 @@ def verify_firmware(source, target, env):
         "0U, 0U, 700U, 700U, 700U, 450U", "kMaximumJogMilliDegrees = 10000",
         "kDirectionDiscoveryJogMilliDegrees = 2000",
         "kServoMaximumPulseRate = 500.0F", "kServoPulseWidthUs = 1000U",
-        "kHostMotionTimeoutMs = 2000U", "j1_home=enabled",
+        "kHostMotionTimeoutMs = 2000U", "j1_home=sensor_or_manual_temporary",
         "kHoldKeepaliveTimeoutMs = 400U", "kMotorHoldTimeoutMs = 2000U",
         "kMaximumHoldTravelMilliDegrees = 45000",
         "kMaximumHoldSpeedMilliDegreesPerSecond = 45000", "hold_keepalive_timeout",
@@ -51,7 +51,9 @@ def verify_firmware(source, target, env):
         "hold_release_rejected", "disable_all();",
         "handoff_motor_hold_to_motion", "result=handoff driver_disabled=0",
         "PAROL6_MOTION_STARTED", "PAROL6_MOTION_DONE", "PAROL6_HOME",
-        "CAL_CONFIG", "CAL_LIMIT", "CAL_RESET", "RAW_JOG",
+        "CAL_CONFIG", "CAL_LIMIT", "CAL_RESET", "RAW_JOG", "MANUAL_HOME",
+        "SET_CURRENT_POSITION_ZERO_TEMPORARY", "PAROL6_MANUAL_HOME",
+        "manual_home_j1_only", "manual_home_temporary",
         "DIRECTION_DISCOVERY_VERIFIED", "PAROL6_RAW_JOG_STARTED",
         "raw_jog_requires_unhomed_axis", "logical_target_is_safe",
         "maximum_soft_limit", "minimum_soft_limit", "print_calibration",
@@ -81,9 +83,9 @@ def verify_firmware(source, target, env):
         if required not in symbols:
             raise RuntimeError(f"motion RC required symbol absent: {required}")
     firmware_strings = subprocess.check_output([str(strings), str(elf_path)], text=True)
-    for required in ("0.8.1-calibration-rc", "servo_signal=push_pull_3v3", "servo_clock_max_hz=500", "servo_pulse_us=1000", "motor_hold=host_supervised", "home_sequence=J1,J2,J3,J4,J6,J5", "calibration=dual_slot_crc32c", "soft_limits=firmware_enforced", "direction_discovery=raw_2deg", "PAROL6_RAW_JOG_STARTED", "PAROL6_HOLD_STARTED", "PAROL6_MOTOR_HOLD", "PAROL6_STATUS", "PAROL6_CALIBRATION", "operator_stop"):
+    for required in ("0.8.2-calibration-rc", "servo_signal=push_pull_3v3", "servo_clock_max_hz=500", "servo_pulse_us=1000", "motor_hold=host_supervised", "home_sequence=J2,J3,J4,J6,J5", "j1_home=sensor_or_manual_temporary", "manual_zero=j1_runtime_only", "calibration=dual_slot_crc32c", "soft_limits=firmware_enforced", "direction_discovery=raw_2deg", "PAROL6_MANUAL_HOME", "PAROL6_RAW_JOG_STARTED", "PAROL6_HOLD_STARTED", "PAROL6_MOTOR_HOLD", "PAROL6_STATUS", "PAROL6_CALIBRATION", "operator_stop"):
         if required not in firmware_strings:
             raise RuntimeError(f"motion RC identity string absent: {required}")
-    print("PAROL6 calibration RC verification passed: dual-slot retained calibration, all-joint homing, logical directions, captured soft limits, and preserved motion interlocks")
+    print("PAROL6 calibration RC verification passed: J1 temporary manual zero, retained sensor homing, dual-slot calibration, captured soft limits, and preserved motion interlocks")
 
 env.AddPostAction("$BUILD_DIR/${PROGNAME}.elf", verify_firmware)

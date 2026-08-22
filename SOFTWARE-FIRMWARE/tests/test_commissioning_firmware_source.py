@@ -21,7 +21,7 @@ class MotionRcFirmwareSourceTests(unittest.TestCase):
     def test_project_is_bootloader_bounded_and_versioned(self) -> None:
         self.assertIn("board_build.flash_offset = 0x20000", self.ini)
         self.assertIn("board_upload.maximum_size = 262144", self.ini)
-        self.assertIn("0.8.1-calibration-rc", self.ini)
+        self.assertIn("0.8.2-calibration-rc", self.ini)
 
     def test_all_owner_selected_joint_and_sensor_pins_are_present(self) -> None:
         for pin in (
@@ -90,6 +90,15 @@ class MotionRcFirmwareSourceTests(unittest.TestCase):
         self.assertIn("sensor_not_found_30deg", self.source)
         self.assertIn("INITIAL_BACKOFF", self.source)
         self.assertIn("SLOW_SEEK", self.source)
+
+    def test_j1_temporary_manual_zero_is_non_motion_and_runtime_only(self) -> None:
+        self.assertIn('std::strcmp(verb, "MANUAL_HOME")', self.source)
+        self.assertIn("SET_CURRENT_POSITION_ZERO_TEMPORARY", self.source)
+        self.assertIn("manual_home_j1_only", self.source)
+        self.assertIn("PAROL6_MANUAL_HOME", self.source)
+        self.assertIn("manual_home_temporary", self.source)
+        self.assertIn("manual_zero=j1_runtime_only", self.source)
+        self.assertIn("limits_reset=1 temporary=1", self.source)
 
     def test_joint_directions_and_soft_limits_are_firmware_enforced(self) -> None:
         self.assertIn("positive_direction_raw_positive", self.source)

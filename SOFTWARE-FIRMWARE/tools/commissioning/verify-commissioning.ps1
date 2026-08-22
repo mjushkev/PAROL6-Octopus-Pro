@@ -20,16 +20,17 @@ try {
     $serial.DiscardInBuffer()
     $identity = Invoke-Line "IDENTIFY"
     if ($identity -notmatch 'PAROL6_MOTION_RC_READY' -or
-        $identity -notmatch 'version=0\.8\.1-calibration-rc' -or
+        $identity -notmatch 'version=0\.8\.2-calibration-rc' -or
         $identity -notmatch 'joints=6' -or
         $identity -notmatch 'stops=8' -or
-        $identity -notmatch 'home_sequence=J1,J2,J3,J4,J6,J5' -or
+        $identity -notmatch 'home_sequence=J2,J3,J4,J6,J5' -or
         $identity -notmatch 'hold_speed_mdeg_s=3000-45000' -or
         $identity -notmatch 'motor_hold=host_supervised' -or
-        $identity -notmatch 'j1_home=enabled' -or
+        $identity -notmatch 'j1_home=sensor_or_manual_temporary' -or
         $identity -notmatch 'calibration=dual_slot_crc32c' -or
         $identity -notmatch 'soft_limits=firmware_enforced' -or
         $identity -notmatch 'direction_discovery=raw_2deg' -or
+        $identity -notmatch 'manual_zero=j1_runtime_only' -or
         $identity -notmatch 'driver_disabled=1') {
         throw "Unexpected commissioning identity: $identity"
     }

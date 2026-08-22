@@ -196,7 +196,7 @@ const ports: Port[] = [
   },
   {
     id: "usb", label: "USB-C", item: "Primary PC control and service link", status: "mapped",
-    x: 82.0, y: 24.7, w: 6.5, h: 9.5, pins: "USB-C · PA11 D− / PA12 D+", wiring: ["Leave the ESP completely disconnected", "Keep the VUSB jumper removed when external 24 V is connected", "Connect a known-good USB data cable directly from the PC → Octopus USB-C", "Use the joint setup console; every mutable command requires a fresh token"], note: "USB is the primary transport. Calibration RC 0.8.1 adds bounded raw-direction discovery before setup, keeps J1/J2 in open-loop Servo42C mode, homes J1–J6, and retains and enforces captured limits. Remove USB before changing any jumper or connector.",
+    x: 82.0, y: 24.7, w: 6.5, h: 9.5, pins: "USB-C · PA11 D− / PA12 D+", wiring: ["Leave the ESP completely disconnected", "Keep the VUSB jumper removed when external 24 V is connected", "Connect a known-good USB data cable directly from the PC → Octopus USB-C", "Use the joint setup console; every mutable command requires a fresh token"], note: "USB is the primary transport. Calibration RC 0.8.2 adds bounded raw-direction discovery and a temporary J1 manual-zero option, keeps J1/J2 in open-loop Servo42C mode, and retains and enforces captured limits. Remove USB before changing any jumper or connector.",
   },
   {
     id: "usb-a", label: "USB-A", item: "Unused USB host/OTG connector", status: "unused",

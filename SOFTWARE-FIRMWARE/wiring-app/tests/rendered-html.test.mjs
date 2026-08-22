@@ -23,11 +23,13 @@ test("renders the simplified PAROL6 joint calibration workbench", async () => {
   assert.match(html, /Which raw direction moves toward home/i);
   assert.match(html, /Sensor value when triggered/i);
   assert.match(html, /Save joint setup/i);
-  assert.match(html, /Home joint/i);
+  assert.match(html, /Set temporary J1 zero/i);
+  assert.match(html, /Set current J1 position as 0°/i);
+  assert.match(html, /J1 SENSOR BYPASS/i);
   assert.match(html, /Set min here/i);
   assert.match(html, /Set max here/i);
   assert.match(html, /Export JSON/i);
-  assert.match(html, /Home All/i);
+  assert.match(html, /Home J2–J6/i);
   assert.match(html, /Controller log/i);
   assert.doesNotMatch(html, /MOTION INTERLOCKS|Arm supported against gravity|Arm hold-to-jog/i);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);

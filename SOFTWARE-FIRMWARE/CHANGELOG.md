@@ -4,6 +4,13 @@
 
 ### Added
 
+- `0.8.2-calibration-rc` adds a J1-only, non-motion temporary manual-zero
+  command for operation while the J1 home sensor is unavailable. It disables
+  every driver, assigns the current J1 step position to 0°, clears stale J1
+  limits, identifies the runtime source as `MANUAL_TEMP`, and never persists a
+  false homed state across reboot. The Site gives J1 a short manual-position
+  workflow, records the temporary method in JSON, and homes only J2-J6 in its
+  grouped sensor-homing action.
 - `0.8.1-calibration-rc` adds a pre-configuration `RAW_JOG` direction test:
   each press moves one unhomed joint exactly 2° in a physical motor direction,
   independent of the saved logical mapping. The redesigned Site uses one

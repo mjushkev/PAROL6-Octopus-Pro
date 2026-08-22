@@ -1,7 +1,8 @@
 # PAROL6 joint calibration release candidate
 
-Version `0.8.1-calibration-rc` provides direct-USB manual control, fixed raw
-direction-discovery moves, guarded sensor homing for J1-J6, retained direction
+Version `0.8.2-calibration-rc` provides direct-USB manual control, fixed raw
+direction-discovery moves, a temporary manual reference for J1 while its sensor
+is unavailable, guarded sensor homing for J2-J6, retained direction
 configuration, captured firmware soft limits, and JSON export. The Site is a
 single-joint setup workbench rather than an unrestricted production controller.
 
@@ -35,8 +36,11 @@ suspected missed step, belt slip, or collision.
 3. Choose which raw direction means logical positive, which raw direction seeks
    home, and whether the home sensor triggers high or low. Logical negative is
    always the inverse. Press **Save setup**.
-4. Press **Home joint**. Firmware clears an active sensor, seeks at gentle speed
-   for at most 30°, backs off, adds a 0.5° margin, and re-latches slowly at 0°.
+4. For J1, release holding torque, switch 24 V off, turn the base by hand to the
+   desired 0°, switch 24 V on, and press **Set current J1 position as 0°**. This
+   non-motion action disables all drivers, clears both old J1 limits, and lasts
+   only until the controller restarts. For J2-J6, press **Home joint** to clear,
+   seek, back off, and re-latch the sensor slowly at 0°.
 5. Tap-jog by 1°, 5°, or 10°, or hold a direction button at 3-45°/s. Release of
    a hold-jog stops and keeps stationary motor torque, so another jog can begin
    without releasing torque first.
@@ -87,9 +91,11 @@ moving the robot. It does not affect the other five joints.
 
 ## Home All and test programs
 
-Home All is available only after every joint has a saved minimum and maximum
-and J1/J2 are armed for the current boot. It runs one axis at a time in the
-order J1, J2, J3, J4, J6, J5 and stops on the first fault.
+The grouped home action is available only after every joint has a saved minimum
+and maximum and J1/J2 are armed for the current boot. It homes one axis at a
+time in the order J2, J3, J4, J6, J5 and stops on the first fault. J1 is never
+included while its sensor is bypassed; establish its temporary manual zero
+separately after every controller restart.
 
 The direction check, wrist articulation, and Servo42C repeatability programs
 remain serialized and become available after all six joints are homed.
@@ -102,7 +108,7 @@ CALIBRATION
 SERVO_CONFIG J1 <token> ACTIVE_LOW INTERFACE_VERIFIED
 RAW_JOG J1 <token> + DIRECTION_DISCOVERY_VERIFIED
 CAL_CONFIG J1 <token> HOME_RAW_NEG POSITIVE_RAW_POS ACTIVE_LOW SAVE_CALIBRATION_VERIFIED
-HOME J1 <token> START
+MANUAL_HOME J1 <token> SET_CURRENT_POSITION_ZERO_TEMPORARY
 JOG J1 <token> - 1000 GENTLE
 CAL_LIMIT J1 <token> MIN CAPTURE_LIMIT_VERIFIED
 JOG J1 <token> + 1000 GENTLE

@@ -130,6 +130,7 @@ std::array<bool, 6> home_direction_positive{};
 std::array<bool, 6> home_active_level{};
 std::array<bool, 6> positive_direction_raw_positive{};
 std::array<bool, 6> homed{};
+std::array<bool, 6> manual_home_temporary{};
 std::array<char, kLineCapacity + 1U> line{};
 std::size_t line_length = 0U;
 std::uint32_t command_token = 0U;
@@ -466,9 +467,11 @@ void print_ready() {
                "servo_pulse_us=1000 profiles=GENTLE,NORMAL,BRISK "
                "hold_speed_mdeg_s=3000-45000 hold_cap_mdeg=45000 "
                "motor_hold=host_supervised "
-               "home_sequence=J1,J2,J3,J4,J6,J5 j1_home=enabled "
+               "home_sequence=J2,J3,J4,J6,J5 "
+               "j1_home=sensor_or_manual_temporary "
                "calibration=dual_slot_crc32c soft_limits=firmware_enforced "
                "direction_discovery=raw_2deg "
+               "manual_zero=j1_runtime_only "
                "driver_disabled=");
   Serial.print(motion.running ? 0 : 1);
   Serial.print(" token=");
@@ -533,6 +536,11 @@ void print_status() {
     Serial.print(axis + 1U);
     Serial.print("_homed=");
     Serial.print(homed[axis] ? 1 : 0);
+    Serial.print(" J");
+    Serial.print(axis + 1U);
+    Serial.print("_home_source=");
+    Serial.print(!homed[axis] ? "NONE" :
+                 manual_home_temporary[axis] ? "MANUAL_TEMP" : "SENSOR");
   }
   Serial.print(" driver_disabled=");
   Serial.print((motion.running || motor_hold_active) ? 0 : 1);
@@ -583,6 +591,9 @@ void print_joint_calibration(std::size_t axis) {
   Serial.print(joint.pulses_per_degree);
   Serial.print(" homed=");
   Serial.print(homed[axis] ? 1 : 0);
+  Serial.print(" home_source=");
+  Serial.print(!homed[axis] ? "NONE" :
+               manual_home_temporary[axis] ? "MANUAL_TEMP" : "SENSOR");
   Serial.print("\r\n");
 }
 
@@ -962,6 +973,7 @@ void service_home() {
         stop_stepper_now(axis);
         stepper.setCurrentPosition(0L);
         homed[axis] = true;
+        manual_home_temporary[axis] = false;
         end_motion("complete");
         return;
       }
@@ -1054,6 +1066,7 @@ bool configure_joint_calibration(std::size_t axis, bool home_raw_positive,
   }
   if (!persist_calibration()) return false;
   homed[axis] = false;
+  manual_home_temporary[axis] = false;
   steppers[axis]->setCurrentPosition(0L);
   rotate_token();
   Serial.print("PAROL6_CALIBRATION_SAVED joint=J");
@@ -1128,6 +1141,7 @@ bool reset_joint_calibration(std::size_t axis) {
   calibration_record.joints[axis] = replacement;
   if (!persist_calibration()) return false;
   homed[axis] = false;
+  manual_home_temporary[axis] = false;
   steppers[axis]->setCurrentPosition(0L);
   rotate_token();
   Serial.print("PAROL6_CALIBRATION_RESET joint=J");
@@ -1331,6 +1345,40 @@ void handle_line(char* command) {
     Serial.print(" signal=PUSH_PULL_3V3 driver_disabled=1 token=");
     print_token(command_token);
     Serial.print("\r\n");
+    return;
+  }
+  if (std::strcmp(verb, "MANUAL_HOME") == 0) {
+    const char* confirmation = ::strtok_r(nullptr, " ", &context);
+    if (axis != 0U) {
+      error("manual_home_j1_only");
+      return;
+    }
+    if (!home_configured[axis] || confirmation == nullptr ||
+        std::strcmp(confirmation,
+                    "SET_CURRENT_POSITION_ZERO_TEMPORARY") != 0) {
+      error("manual_home_rejected");
+      return;
+    }
+    disable_all();
+    auto& joint = calibration_record.joints[axis];
+    joint.flags &= static_cast<std::uint8_t>(
+        ~(parol6::calibration::kMinimumSet |
+          parol6::calibration::kMaximumSet));
+    joint.minimum_millidegrees = 0;
+    joint.maximum_millidegrees = 0;
+    if (!persist_calibration()) return;
+    steppers[axis]->setCurrentPosition(0L);
+    homed[axis] = true;
+    manual_home_temporary[axis] = true;
+    rotate_token();
+    Serial.print("PAROL6_MANUAL_HOME joint=J1 result=complete "
+                 "position_mdeg=0 limits_reset=1 temporary=1 "
+                 "driver_disabled=1 sequence=");
+    Serial.print(calibration_record.sequence);
+    Serial.print(" token=");
+    print_token(command_token);
+    Serial.print("\r\n");
+    print_joint_calibration(axis);
     return;
   }
   if (std::strcmp(verb, "CAL_CONFIG") == 0) {
