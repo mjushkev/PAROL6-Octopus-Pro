@@ -339,13 +339,21 @@ bool handoff_motor_hold_to_motion(std::size_t axis) {
   return true;
 }
 
-void hold_position_after_jog_release() {
+void finish_hold_jog_release() {
   const std::size_t axis = motion.axis;
   sample_sensors();
   if (stop_states[axis].stable != motion.initial_axis_sensor ||
       stop_states[6].stable != motion.initial_other_stops[0] ||
       stop_states[7].stable != motion.initial_other_stops[1]) {
     end_motion("limit_abort");
+    return;
+  }
+  // J1/J2 use Servo42C modules in the owner's open-loop configuration. Their
+  // internal position-hold loop can hunt when left enabled at standstill, so
+  // always remove torque after a hold-to-jog release. Gravity-load J2 must be
+  // externally supported. TMC2209 joints retain the requested motor hold.
+  if (axis < 2U) {
+    end_motion("coast_release");
     return;
   }
   const long position = steppers[axis]->currentPosition();
@@ -466,7 +474,7 @@ void print_ready() {
                "servo_signal=push_pull_3v3 servo_clock_max_hz=500 "
                "servo_pulse_us=1000 profiles=GENTLE,NORMAL,BRISK "
                "hold_speed_mdeg_s=3000-45000 hold_cap_mdeg=45000 "
-               "motor_hold=host_supervised "
+               "motor_hold=host_supervised servo_hold=disabled "
                "home_sequence=J2,J3,J4,J6,J5 "
                "j1_home=sensor_or_manual_temporary "
                "calibration=dual_slot_crc32c soft_limits=firmware_enforced "
@@ -1221,7 +1229,7 @@ void handle_line(char* command) {
       error("hold_release_rejected");
       return;
     }
-    hold_position_after_jog_release();
+    finish_hold_jog_release();
     return;
   }
   if (motion.running) {
@@ -1268,6 +1276,10 @@ void handle_line(char* command) {
       if (motion.running || motor_hold_active ||
           std::strcmp(confirmation, "HOLD_TORQUE_VERIFIED") != 0) {
         error("motor_hold_busy_or_unconfirmed");
+        return;
+      }
+      if (axis < 2U) {
+        error("servo_hold_disabled");
         return;
       }
       if (axis < 2U && !servo_gate_open[axis]) {
