@@ -44,6 +44,8 @@ constexpr std::int32_t kHomeSeekMilliDegrees = 30000;
 constexpr std::int32_t kHomeBackoffMilliDegrees = 5000;
 constexpr std::int32_t kHomeMarginMilliDegrees = 500;
 constexpr std::int32_t kHomeLatchMilliDegrees = 3000;
+constexpr std::int32_t kJ1HardMinimumMilliDegrees = -230000;
+constexpr std::int32_t kJ1HardMaximumMilliDegrees = 35000;
 
 constexpr std::array<std::uint32_t, 6> kStepPins = {
     PF13, PG0, PF11, PG4, PF9, PC13};
@@ -202,8 +204,18 @@ void set_joint_flag(std::size_t axis, std::uint8_t flag, bool enabled) {
   else flags &= static_cast<std::uint8_t>(~flag);
 }
 
+void apply_j1_hardcoded_limits() {
+  auto& joint = calibration_record.joints[0];
+  joint.minimum_millidegrees = kJ1HardMinimumMilliDegrees;
+  joint.maximum_millidegrees = kJ1HardMaximumMilliDegrees;
+  joint.flags |= static_cast<std::uint8_t>(
+      parol6::calibration::kMinimumSet |
+      parol6::calibration::kMaximumSet);
+}
+
 void load_calibration_runtime() {
   calibration_record = calibration_store.record();
+  apply_j1_hardcoded_limits();
   for (std::size_t axis = 0U; axis < 6U; ++axis) {
     home_configured[axis] =
         joint_flag(axis, parol6::calibration::kConfigured);
@@ -477,6 +489,7 @@ void print_ready() {
                "motor_hold=host_supervised servo_hold=disabled "
                "home_sequence=J2,J3,J4,J6,J5 "
                "j1_home=sensor_or_manual_temporary "
+               "j1_limits_mdeg=-230000:35000 "
                "calibration=dual_slot_crc32c soft_limits=firmware_enforced "
                "direction_discovery=raw_2deg "
                "manual_zero=j1_runtime_only "
@@ -595,6 +608,8 @@ void print_joint_calibration(std::size_t axis) {
   Serial.print(maximum_is_set(axis) ? 1 : 0);
   Serial.print(" max_mdeg=");
   Serial.print(joint.maximum_millidegrees);
+  Serial.print(" limit_source=");
+  Serial.print(axis == 0U ? "HARDCODED" : "CAPTURED");
   Serial.print(" pulses_per_degree=");
   Serial.print(joint.pulses_per_degree);
   Serial.print(" homed=");
@@ -1065,13 +1080,14 @@ bool configure_joint_calibration(std::size_t axis, bool home_raw_positive,
   const bool changed = (joint.flags & direction_mask) != requested;
   joint.flags = static_cast<std::uint8_t>(
       (joint.flags & ~direction_mask) | requested);
-  if (changed) {
+  if (changed && axis != 0U) {
     joint.flags &= static_cast<std::uint8_t>(
         ~(parol6::calibration::kMinimumSet |
           parol6::calibration::kMaximumSet));
     joint.minimum_millidegrees = 0;
     joint.maximum_millidegrees = 0;
   }
+  if (axis == 0U) apply_j1_hardcoded_limits();
   if (!persist_calibration()) return false;
   homed[axis] = false;
   manual_home_temporary[axis] = false;
@@ -1099,6 +1115,10 @@ bool configure_joint_calibration(std::size_t axis, bool home_raw_positive,
 }
 
 bool capture_joint_limit(std::size_t axis, bool minimum) {
+  if (axis == 0U) {
+    error("j1_limits_hardcoded");
+    return false;
+  }
   if (!homed[axis]) {
     error("axis_not_homed");
     return false;
@@ -1147,6 +1167,7 @@ bool reset_joint_calibration(std::size_t axis) {
   auto replacement = parol6::calibration::JointRecord{};
   replacement.pulses_per_degree = kPulsesPerDegree[axis];
   calibration_record.joints[axis] = replacement;
+  if (axis == 0U) apply_j1_hardcoded_limits();
   if (!persist_calibration()) return false;
   homed[axis] = false;
   manual_home_temporary[axis] = false;
@@ -1372,19 +1393,14 @@ void handle_line(char* command) {
       return;
     }
     disable_all();
-    auto& joint = calibration_record.joints[axis];
-    joint.flags &= static_cast<std::uint8_t>(
-        ~(parol6::calibration::kMinimumSet |
-          parol6::calibration::kMaximumSet));
-    joint.minimum_millidegrees = 0;
-    joint.maximum_millidegrees = 0;
+    apply_j1_hardcoded_limits();
     if (!persist_calibration()) return;
     steppers[axis]->setCurrentPosition(0L);
     homed[axis] = true;
     manual_home_temporary[axis] = true;
     rotate_token();
     Serial.print("PAROL6_MANUAL_HOME joint=J1 result=complete "
-                 "position_mdeg=0 limits_reset=1 temporary=1 "
+                 "position_mdeg=0 limits_fixed=-230000:35000 temporary=1 "
                  "driver_disabled=1 sequence=");
     Serial.print(calibration_record.sequence);
     Serial.print(" token=");

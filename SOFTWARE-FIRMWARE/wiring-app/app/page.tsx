@@ -196,7 +196,7 @@ const ports: Port[] = [
   },
   {
     id: "usb", label: "USB-C", item: "Primary PC control and service link", status: "mapped",
-    x: 82.0, y: 24.7, w: 6.5, h: 9.5, pins: "USB-C · PA11 D− / PA12 D+", wiring: ["Leave the ESP completely disconnected", "Keep the VUSB jumper removed when external 24 V is connected", "Connect a known-good USB data cable directly from the PC → Octopus USB-C", "Use the joint setup console; every mutable command requires a fresh token"], note: "USB is the primary transport. Calibration RC 0.8.3 keeps J1/J2 in open-loop Servo42C mode and releases their torque after hold-to-jog to prevent unstable holding; support gravity-loaded J2. Captured limits remain enforced. Remove USB before changing any jumper or connector.",
+    x: 82.0, y: 24.7, w: 6.5, h: 9.5, pins: "USB-C · PA11 D− / PA12 D+", wiring: ["Leave the ESP completely disconnected", "Keep the VUSB jumper removed when external 24 V is connected", "Connect a known-good USB data cable directly from the PC → Octopus USB-C", "Use the joint setup console; every mutable command requires a fresh token"], note: "USB is the primary transport. Calibration RC 0.8.4 releases J1/J2 Servo42C torque after hold-to-jog and enforces fixed J1 limits of −230° to +35° from temporary manual zero. Support gravity-loaded J2. Remove USB before changing any jumper or connector.",
   },
   {
     id: "usb-a", label: "USB-A", item: "Unused USB host/OTG connector", status: "unused",
