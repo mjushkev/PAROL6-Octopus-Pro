@@ -21,7 +21,7 @@ class MotionRcFirmwareSourceTests(unittest.TestCase):
     def test_project_is_bootloader_bounded_and_versioned(self) -> None:
         self.assertIn("board_build.flash_offset = 0x20000", self.ini)
         self.assertIn("board_upload.maximum_size = 262144", self.ini)
-        self.assertIn("0.8.9-calibration-rc", self.ini)
+        self.assertIn("0.8.10-calibration-rc", self.ini)
 
     def test_all_owner_selected_joint_and_sensor_pins_are_present(self) -> None:
         for pin in (
@@ -115,6 +115,13 @@ class MotionRcFirmwareSourceTests(unittest.TestCase):
         self.assertIn('std::strcmp(verb, "CAL_LIMIT")', self.source)
         self.assertIn('std::strcmp(verb, "CAL_RESET")', self.source)
         self.assertIn("axis_not_homed", self.source)
+
+    def test_j6_limits_are_hardcoded_to_plus_minus_180_degrees(self) -> None:
+        self.assertIn("kJ6HardMinimumMilliDegrees = -180000", self.source)
+        self.assertIn("kJ6HardMaximumMilliDegrees = 180000", self.source)
+        self.assertIn("apply_j6_hardcoded_limits", self.source)
+        self.assertIn("j6_limits_hardcoded", self.source)
+        self.assertIn('"j6_limits_mdeg=-180000:180000 "', self.source)
 
     def test_calibration_is_crc_checked_and_dual_slot_persistent(self) -> None:
         for value in (

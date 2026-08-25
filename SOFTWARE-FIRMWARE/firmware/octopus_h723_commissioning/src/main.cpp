@@ -50,6 +50,8 @@ constexpr std::int32_t kHomeMarginMilliDegrees = 500;
 constexpr std::int32_t kHomeLatchMilliDegrees = 3000;
 constexpr std::int32_t kJ1HardMinimumMilliDegrees = -230000;
 constexpr std::int32_t kJ1HardMaximumMilliDegrees = 35000;
+constexpr std::int32_t kJ6HardMinimumMilliDegrees = -180000;
+constexpr std::int32_t kJ6HardMaximumMilliDegrees = 180000;
 
 constexpr std::array<std::uint32_t, 6> kStepPins = {
     PF13, PG0, PF11, PG4, PF9, PC13};
@@ -219,9 +221,23 @@ void apply_j1_hardcoded_limits() {
       parol6::calibration::kMaximumSet);
 }
 
+void apply_j6_hardcoded_limits() {
+  auto& joint = calibration_record.joints[5];
+  joint.minimum_millidegrees = kJ6HardMinimumMilliDegrees;
+  joint.maximum_millidegrees = kJ6HardMaximumMilliDegrees;
+  joint.flags |= static_cast<std::uint8_t>(
+      parol6::calibration::kMinimumSet |
+      parol6::calibration::kMaximumSet);
+}
+
+void apply_hardcoded_limits() {
+  apply_j1_hardcoded_limits();
+  apply_j6_hardcoded_limits();
+}
+
 void load_calibration_runtime() {
   calibration_record = calibration_store.record();
-  apply_j1_hardcoded_limits();
+  apply_hardcoded_limits();
   for (std::size_t axis = 0U; axis < 6U; ++axis) {
     home_configured[axis] =
         joint_flag(axis, parol6::calibration::kConfigured);
@@ -517,6 +533,7 @@ void print_ready() {
                "home_initial_release_max_mdeg=30000 "
                "j1_home=sensor_or_manual_temporary "
                "j1_limits_mdeg=-230000:35000 "
+               "j6_limits_mdeg=-180000:180000 "
                "calibration=dual_slot_crc32c soft_limits=firmware_enforced "
                "direction_discovery=raw_2deg "
                "manual_zero=j1_runtime_only "
@@ -636,7 +653,7 @@ void print_joint_calibration(std::size_t axis) {
   Serial.print(" max_mdeg=");
   Serial.print(joint.maximum_millidegrees);
   Serial.print(" limit_source=");
-  Serial.print(axis == 0U ? "HARDCODED" : "CAPTURED");
+  Serial.print((axis == 0U || axis == 5U) ? "HARDCODED" : "CAPTURED");
   Serial.print(" pulses_per_degree=");
   Serial.print(joint.pulses_per_degree);
   Serial.print(" homed=");
@@ -1170,6 +1187,7 @@ bool configure_joint_calibration(std::size_t axis, bool home_raw_positive,
     joint.maximum_millidegrees = 0;
   }
   if (axis == 0U) apply_j1_hardcoded_limits();
+  else if (axis == 5U) apply_j6_hardcoded_limits();
   if (!persist_calibration()) return false;
   homed[axis] = false;
   manual_home_temporary[axis] = false;
@@ -1199,6 +1217,10 @@ bool configure_joint_calibration(std::size_t axis, bool home_raw_positive,
 bool capture_joint_limit(std::size_t axis, bool minimum) {
   if (axis == 0U) {
     error("j1_limits_hardcoded");
+    return false;
+  }
+  if (axis == 5U) {
+    error("j6_limits_hardcoded");
     return false;
   }
   if (!homed[axis]) {
@@ -1255,6 +1277,7 @@ bool reset_joint_calibration(std::size_t axis) {
   replacement.pulses_per_degree = kPulsesPerDegree[axis];
   calibration_record.joints[axis] = replacement;
   if (axis == 0U) apply_j1_hardcoded_limits();
+  else if (axis == 5U) apply_j6_hardcoded_limits();
   if (!persist_calibration()) return false;
   homed[axis] = false;
   manual_home_temporary[axis] = false;
