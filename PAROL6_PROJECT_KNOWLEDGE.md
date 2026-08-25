@@ -95,6 +95,11 @@ captures only the opposite travel limit. The calibration JSON retains the raw
 home direction, raw logical-positive direction, derived joint-space home
 direction, and automatic home-limit side.
 
+Firmware 0.8.7 increases the active-start release ceiling from 5 degrees to 30
+degrees. This is not a commanded fixed travel: motion remains opposite the
+configured home direction and stops immediately when the debounced input
+clears. Reaching the ceiling while still active stops homing with a fault.
+
 This is a hybrid motor-control arrangement: J1-J2 use MKS SERVO42C hardware
 with magnetic encoder feedback, while J3-J6 use TMC2209 drivers. The J1-J2
 encoders close the loop at the motor shaft; they can improve motor-position

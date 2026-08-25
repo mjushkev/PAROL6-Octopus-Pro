@@ -562,6 +562,11 @@ limit. Motion away from an active, already-validated J2/J3 home input may clear
 that input normally; a transition toward home or a re-trigger still aborts
 motion.
 
+The active-start release has a 30-degree maximum travel ceiling for the
+owner's assembled J2/J3 geometry. It stops as soon as the debounced switch
+clears; the ceiling exists only to terminate a wrong direction, stuck input, or
+mechanical failure.
+
 Initial completed-robot sequence: J1, J2, J3, J4, J6, J5, one joint at a time with the arm supported as needed. Only after collision and gravity tests may J1-J3 be evaluated for safe parallel homing. Never copy the upstream firmware's defective homing state assignments.
 
 ### 7.9 Voltage, temperature, I/O, and gripper

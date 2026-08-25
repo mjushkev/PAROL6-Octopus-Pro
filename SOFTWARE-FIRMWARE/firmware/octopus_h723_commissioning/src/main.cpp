@@ -41,6 +41,7 @@ constexpr std::int32_t kMaximumHoldTravelMilliDegrees = 45000;
 constexpr std::int32_t kMinimumHoldSpeedMilliDegreesPerSecond = 3000;
 constexpr std::int32_t kMaximumHoldSpeedMilliDegreesPerSecond = 45000;
 constexpr std::int32_t kHomeSeekMilliDegrees = 30000;
+constexpr std::int32_t kHomeInitialReleaseMilliDegrees = 30000;
 constexpr std::int32_t kHomeBackoffMilliDegrees = 5000;
 constexpr std::int32_t kHomeMarginMilliDegrees = 500;
 constexpr std::int32_t kHomeLatchMilliDegrees = 3000;
@@ -501,6 +502,7 @@ void print_ready() {
                "home_sequence=J2,J3,J4,J6,J5 "
                "mechanical_home_map=J2:PG10,J3:PG12,J5:PG9 "
                "home_limits=J2:J3:auto_zero_boundary "
+               "home_initial_release_max_mdeg=30000 "
                "j1_home=sensor_or_manual_temporary "
                "j1_limits_mdeg=-230000:35000 "
                "calibration=dual_slot_crc32c soft_limits=firmware_enforced "
@@ -890,8 +892,8 @@ void start_home_phase(HomePhase phase) {
       print_home_phase(axis, "INITIAL_BACKOFF");
       prepare_raw_move(axis,
                        home_direction_positive[axis]
-                           ? -kHomeBackoffMilliDegrees
-                           : kHomeBackoffMilliDegrees,
+                           ? -kHomeInitialReleaseMilliDegrees
+                           : kHomeInitialReleaseMilliDegrees,
                        kProfiles[0]);
       break;
     case HomePhase::fast_seek:
@@ -1077,7 +1079,7 @@ void service_home() {
   if (stepper.distanceToGo() != 0) return;
   switch (motion.home_phase) {
     case HomePhase::initial_backoff:
-      end_motion("sensor_stuck_active");
+      end_motion("sensor_stuck_active_30deg");
       break;
     case HomePhase::fast_seek:
       end_motion("sensor_not_found_30deg");
