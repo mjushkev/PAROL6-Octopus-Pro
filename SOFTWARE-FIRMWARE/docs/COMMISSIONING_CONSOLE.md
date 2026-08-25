@@ -1,6 +1,6 @@
 # PAROL6 joint calibration release candidate
 
-Version `0.8.11-calibration-rc` provides direct-USB manual control, fixed raw
+Version `0.8.12-calibration-rc` provides direct-USB manual control, fixed raw
 direction-discovery moves, a temporary manual reference for J1 while its sensor
 is unavailable, guarded sensor homing for J2-J6, retained direction
 configuration, captured firmware soft limits, and JSON export. The Site is a
@@ -14,13 +14,16 @@ through the calibration command.
 Each configured joint can be homed individually with the adapted standard
 PAROL6 two-pass sequence: bounded seek, backoff, slower re-latch, and a 0°
 reference. J2/J3 add an active-start release because the as-built arm normally
-rests on those switches. The `LIMIT_TEST` command moves a homed joint at the
+rests on those switches. After J4's slow latch, it moves in logical positive
+only until its sensor clears (up to a 30° failure ceiling), then saves that
+clear position as J4's `0.000°` minimum. The `LIMIT_TEST` command moves a homed joint at the
 GENTLE profile to either its maximum minus 10° or its exact maximum. `STOP`
 aborts any of these moves, releases stationary hold, and disables all drivers.
 
 ## Angle model
 
-Each successful slow home latch sets that joint to exactly `0.000°`. The home
+Each successful home sets that joint to exactly `0.000°`. J4 assigns zero after
+its final positive sensor-clear move; the other joints assign zero at the latch. The home
 sensor is a repeatable reference; it is not a continuous angle sensor. After
 homing, firmware derives the displayed joint angle from commanded step pulses
 and the owner-selected hardware conversion values:

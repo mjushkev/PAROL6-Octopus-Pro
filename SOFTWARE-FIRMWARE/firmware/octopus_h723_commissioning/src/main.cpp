@@ -104,6 +104,7 @@ enum class HomePhase : std::uint8_t {
   latch_backoff,
   backoff_margin,
   slow_seek,
+  final_clear,
 };
 
 struct MotionProfile {
@@ -276,7 +277,13 @@ bool home_is_logical_positive(std::size_t axis) {
 }
 
 bool has_automatic_home_boundary(std::size_t axis) {
-  return axis == 1U || axis == 2U;  // J2 and J3 rest at their home switches.
+  return axis == 1U || axis == 2U || axis == 3U;
+}
+
+bool automatic_home_boundary_is_minimum(std::size_t axis) {
+  // J4 always clears its sensor in logical positive and defines that clear
+  // position as its zero-degree minimum. J2/J3 retain learned direction logic.
+  return axis == 3U || !home_is_logical_positive(axis);
 }
 
 bool logical_target_is_safe(std::size_t axis, std::int32_t target) {
@@ -531,6 +538,7 @@ void print_ready() {
                "home_sequence=J2,J3,J4,J6,J5 "
                "mechanical_home_map=J2:PG10,J3:PG12,J5:PG9 "
                "home_limits=J2:J3:auto_zero_boundary "
+               "j4_home=positive_clear_then_zero_min "
                "home_style=standard_two_pass_adapted "
                "home_initial_release_max_mdeg=30000 "
                "j1_home=sensor_or_manual_temporary "
@@ -987,6 +995,11 @@ void start_home_phase(HomePhase phase) {
                            : -kHomeLatchMilliDegrees,
                        kProfiles[0], 0.35F);
       break;
+    case HomePhase::final_clear:
+      print_home_phase(axis, "FINAL_CLEAR_POSITIVE");
+      prepare_logical_move(axis, kHomeInitialReleaseMilliDegrees,
+                           kProfiles[0], 0.35F);
+      break;
     case HomePhase::none:
       break;
   }
@@ -1020,7 +1033,7 @@ bool persist_calibration();
 bool apply_automatic_home_boundary(std::size_t axis) {
   if (!has_automatic_home_boundary(axis)) return true;
   auto& joint = calibration_record.joints[axis];
-  const bool minimum = !home_is_logical_positive(axis);
+  const bool minimum = automatic_home_boundary_is_minimum(axis);
   const bool changed = minimum
       ? (!minimum_is_set(axis) || joint.minimum_millidegrees != 0)
       : (!maximum_is_set(axis) || joint.maximum_millidegrees != 0);
@@ -1119,6 +1132,24 @@ void service_home() {
     case HomePhase::slow_seek:
       if (active) {
         stop_stepper_now(axis);
+        if (axis == 3U) {
+          start_home_phase(HomePhase::final_clear);
+          return;
+        }
+        stepper.setCurrentPosition(0L);
+        homed[axis] = true;
+        manual_home_temporary[axis] = false;
+        if (!apply_automatic_home_boundary(axis)) {
+          homed[axis] = false;
+          return;
+        }
+        end_motion("complete");
+        return;
+      }
+      break;
+    case HomePhase::final_clear:
+      if (!active) {
+        stop_stepper_now(axis);
         stepper.setCurrentPosition(0L);
         homed[axis] = true;
         manual_home_temporary[axis] = false;
@@ -1151,6 +1182,9 @@ void service_home() {
       break;
     case HomePhase::slow_seek:
       end_motion("latch_not_found_3deg");
+      break;
+    case HomePhase::final_clear:
+      end_motion("j4_sensor_stuck_active_30deg");
       break;
     case HomePhase::none:
       end_motion("home_state_fault");
@@ -1258,7 +1292,7 @@ bool capture_joint_limit(std::size_t axis, bool minimum) {
     return false;
   }
   if (has_automatic_home_boundary(axis) &&
-      minimum == !home_is_logical_positive(axis)) {
+      minimum == automatic_home_boundary_is_minimum(axis)) {
     error("home_boundary_is_automatic");
     return false;
   }

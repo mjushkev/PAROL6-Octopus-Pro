@@ -13,7 +13,7 @@ test("renders the PAROL6 joint homing and limit test workbench", async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Home and test every joint/i);
-  assert.match(html, /PAROL6 JOINT TEST · 0\.8\.11/i);
+  assert.match(html, /PAROL6 JOINT TEST · 0\.8\.12/i);
   assert.match(html, /Home → test 10° short of maximum → test maximum/i);
   assert.match(html, /Connect USB/i);
   assert.match(html, /Enable setup motion/i);
