@@ -39,6 +39,7 @@ constexpr std::uint32_t kHostMotionTimeoutMs = 2000U;
 constexpr std::uint32_t kMotorHoldTimeoutMs = 2000U;
 constexpr std::uint32_t kHoldKeepaliveTimeoutMs = 400U;
 constexpr std::int32_t kMaximumJogMilliDegrees = 10000;
+constexpr std::int32_t kLimitTestInsetMilliDegrees = 10000;
 constexpr std::int32_t kDirectionDiscoveryJogMilliDegrees = 2000;
 constexpr std::int32_t kMaximumHoldTravelMilliDegrees = 45000;
 constexpr std::int32_t kMinimumHoldSpeedMilliDegreesPerSecond = 3000;
@@ -530,10 +531,12 @@ void print_ready() {
                "home_sequence=J2,J3,J4,J6,J5 "
                "mechanical_home_map=J2:PG10,J3:PG12,J5:PG9 "
                "home_limits=J2:J3:auto_zero_boundary "
+               "home_style=standard_two_pass_adapted "
                "home_initial_release_max_mdeg=30000 "
                "j1_home=sensor_or_manual_temporary "
                "j1_limits_mdeg=-230000:35000 "
                "j6_limits_mdeg=-180000:180000 "
+               "limit_test=max,max_minus_10 motor_stop=software_stop "
                "calibration=dual_slot_crc32c soft_limits=firmware_enforced "
                "direction_discovery=raw_2deg "
                "manual_zero=j1_runtime_only "
@@ -793,6 +796,33 @@ void start_jog(std::size_t axis, bool positive, std::int32_t millidegrees,
   Serial.print(" profile=");
   Serial.print(profile.name);
   Serial.print(" token=");
+  print_token(command_token);
+  Serial.print("\r\n");
+}
+
+void start_limit_test(std::size_t axis, std::int32_t target_millidegrees,
+                      const char* target_name) {
+  sample_sensors();
+  const std::int32_t current = joint_position_millidegrees(axis);
+  const std::int32_t delta = target_millidegrees - current;
+  motion.running = true;
+  motion.kind = MotionKind::jog;
+  motion.axis = axis;
+  motion.positive = delta >= 0;
+  motion.requested_millidegrees = delta >= 0 ? delta : -delta;
+  motion.profile = &kProfiles[0];
+  motion.soft_limit_target = true;
+  motion.initial_axis_sensor = stop_states[axis].stable;
+  motion.initial_other_stops = {stop_states[6].stable, stop_states[7].stable};
+  motion.started_ms = millis();
+  prepare_logical_move(axis, delta, kProfiles[0]);
+  Serial.print("PAROL6_LIMIT_TEST_STARTED joint=J");
+  Serial.print(axis + 1U);
+  Serial.print(" target=");
+  Serial.print(target_name);
+  Serial.print(" target_mdeg=");
+  Serial.print(target_millidegrees);
+  Serial.print(" profile=GENTLE token=");
   print_token(command_token);
   Serial.print("\r\n");
 }
@@ -1379,7 +1409,9 @@ void handle_line(char* command) {
 
   const bool motion_handoff_request =
       motor_hold_active &&
-      (std::strcmp(verb, "JOG") == 0 || std::strcmp(verb, "HOLD") == 0);
+      (std::strcmp(verb, "JOG") == 0 || std::strcmp(verb, "HOLD") == 0 ||
+       std::strcmp(verb, "HOME") == 0 ||
+       std::strcmp(verb, "LIMIT_TEST") == 0);
   const bool held_limit_capture =
       motor_hold_active && std::strcmp(verb, "CAL_LIMIT") == 0 &&
       axis == motor_hold_axis;
@@ -1585,6 +1617,43 @@ void handle_line(char* command) {
     }
     rotate_token();
     start_raw_direction_jog(axis, std::strcmp(direction, "+") == 0);
+    return;
+  }
+  if (std::strcmp(verb, "LIMIT_TEST") == 0) {
+    const char* destination = ::strtok_r(nullptr, " ", &context);
+    const char* confirmation = ::strtok_r(nullptr, " ", &context);
+    if (destination == nullptr || confirmation == nullptr ||
+        (std::strcmp(destination, "MAX") != 0 &&
+         std::strcmp(destination, "MAX_MINUS_10") != 0) ||
+        std::strcmp(confirmation, "LIMIT_TEST_VERIFIED") != 0) {
+      error("limit_test_rejected");
+      return;
+    }
+    if (!home_configured[axis] || !homed[axis]) {
+      error("limit_test_requires_homed_axis");
+      return;
+    }
+    if (!maximum_is_set(axis)) {
+      error("maximum_limit_not_set");
+      return;
+    }
+    const auto& joint = calibration_record.joints[axis];
+    const std::int32_t target =
+        std::strcmp(destination, "MAX") == 0
+            ? joint.maximum_millidegrees
+            : joint.maximum_millidegrees - kLimitTestInsetMilliDegrees;
+    if (!logical_target_is_safe(axis, target)) {
+      error("limit_test_target_outside_limits");
+      return;
+    }
+    if (!watchdog_ready || !preflight_axis(axis)) {
+      error(axis < 2U ? "servo_interface_unverified"
+                      : "driver_preflight_failed");
+      return;
+    }
+    if (!handoff_motor_hold_to_motion(axis)) return;
+    rotate_token();
+    start_limit_test(axis, target, destination);
     return;
   }
   if (std::strcmp(verb, "JOG") == 0) {

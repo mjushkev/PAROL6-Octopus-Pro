@@ -21,7 +21,7 @@ class MotionRcFirmwareSourceTests(unittest.TestCase):
     def test_project_is_bootloader_bounded_and_versioned(self) -> None:
         self.assertIn("board_build.flash_offset = 0x20000", self.ini)
         self.assertIn("board_upload.maximum_size = 262144", self.ini)
-        self.assertIn("0.8.10-calibration-rc", self.ini)
+        self.assertIn("0.8.11-calibration-rc", self.ini)
 
     def test_all_owner_selected_joint_and_sensor_pins_are_present(self) -> None:
         for pin in (
@@ -122,6 +122,20 @@ class MotionRcFirmwareSourceTests(unittest.TestCase):
         self.assertIn("apply_j6_hardcoded_limits", self.source)
         self.assertIn("j6_limits_hardcoded", self.source)
         self.assertIn('"j6_limits_mdeg=-180000:180000 "', self.source)
+
+    def test_limit_test_targets_are_homed_bounded_and_stoppable(self) -> None:
+        self.assertIn("kLimitTestInsetMilliDegrees = 10000", self.source)
+        self.assertIn('std::strcmp(verb, "LIMIT_TEST")', self.source)
+        self.assertIn("LIMIT_TEST_VERIFIED", self.source)
+        self.assertIn("limit_test_requires_homed_axis", self.source)
+        self.assertIn("logical_target_is_safe(axis, target)", self.source)
+        self.assertIn("PAROL6_LIMIT_TEST_STARTED", self.source)
+        self.assertIn('std::strcmp(command, "STOP")', self.source)
+
+    def test_home_and_limit_test_can_take_over_same_axis_motor_hold(self) -> None:
+        handoff_gate = self.source[self.source.index("const bool motion_handoff_request"):]
+        self.assertIn('std::strcmp(verb, "HOME") == 0', handoff_gate)
+        self.assertIn('std::strcmp(verb, "LIMIT_TEST") == 0', handoff_gate)
 
     def test_calibration_is_crc_checked_and_dual_slot_persistent(self) -> None:
         for value in (

@@ -8,13 +8,13 @@ async function render() {
   return worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html" } }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
 }
 
-test("renders the simplified PAROL6 joint calibration workbench", async () => {
+test("renders the PAROL6 joint homing and limit test workbench", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /Set up one joint at a time/i);
-  assert.match(html, /PAROL6 CALIBRATION · 0\.8\.10/i);
-  assert.match(html, /Test direction → save → home → set the far limit/i);
+  assert.match(html, /Home and test every joint/i);
+  assert.match(html, /PAROL6 JOINT TEST · 0\.8\.11/i);
+  assert.match(html, /Home → test 10° short of maximum → test maximum/i);
   assert.match(html, /Connect USB/i);
   assert.match(html, /Enable setup motion/i);
   assert.match(html, /Test raw −/i);
@@ -24,13 +24,16 @@ test("renders the simplified PAROL6 joint calibration workbench", async () => {
   assert.match(html, /Which raw direction moves toward home/i);
   assert.match(html, /Sensor value when triggered/i);
   assert.match(html, /Save joint setup/i);
-  assert.match(html, /Set temporary J1 zero/i);
+  assert.match(html, /Home J1/i);
   assert.match(html, /Set current J1 position as 0°/i);
-  assert.match(html, /J1 SENSOR BYPASS/i);
+  assert.match(html, /J1 TEMPORARY FALLBACK/i);
   assert.match(html, /Set min here/i);
   assert.match(html, /Set max here/i);
   assert.match(html, /Export JSON/i);
-  assert.match(html, /Home J2–J6/i);
+  assert.match(html, /Max −10°/i);
+  assert.match(html, /Max limit/i);
+  assert.match(html, /MOTOR STOP/i);
+  assert.match(html, /Home J2–J6 sequence/i);
   assert.match(html, /Controller log/i);
   assert.doesNotMatch(html, /MOTION INTERLOCKS|Arm supported against gravity|Arm hold-to-jog/i);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);

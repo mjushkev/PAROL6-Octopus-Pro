@@ -47,6 +47,7 @@ def verify_firmware(source, target, env):
         "kHoldKeepaliveTimeoutMs = 400U", "kMotorHoldTimeoutMs = 2000U",
         "kMaximumHoldTravelMilliDegrees = 45000",
         "kMaximumHoldSpeedMilliDegreesPerSecond = 45000", "hold_keepalive_timeout",
+        "kLimitTestInsetMilliDegrees = 10000", "LIMIT_TEST_VERIFIED",
         "kHomeSeekMilliDegrees = 30000", "sensor_not_found_30deg",
         "kHomeInitialReleaseMilliDegrees = 30000", "sensor_stuck_active_30deg",
         "INTERFACE_VERIFIED", "SAVE_CALIBRATION_VERIFIED", "HOLD_POSITION_VERIFIED",
@@ -90,7 +91,7 @@ def verify_firmware(source, target, env):
         if required not in symbols:
             raise RuntimeError(f"motion RC required symbol absent: {required}")
     firmware_strings = subprocess.check_output([str(strings), str(elf_path)], text=True)
-    for required in ("0.8.10-calibration-rc", "servo_signal=push_pull_3v3", "servo_clock_max_hz=J1:500,J2:350", "servo_pulse_us=1000", "j2_lift_accel_max_pulses_s2=900", "j2_servo_ma=local_1600_initial", "motor_hold=host_supervised", "servo_hold=disabled", "home_sequence=J2,J3,J4,J6,J5", "mechanical_home_map=J2:PG10,J3:PG12,J5:PG9", "home_limits=J2:J3:auto_zero_boundary", "home_initial_release_max_mdeg=30000", "j1_home=sensor_or_manual_temporary", "j1_limits_mdeg=-230000:35000", "j6_limits_mdeg=-180000:180000", "j1_limits_hardcoded", "j6_limits_hardcoded", "limits_fixed=-230000:35000", "manual_zero=j1_runtime_only", "calibration=dual_slot_crc32c", "soft_limits=firmware_enforced", "direction_discovery=raw_2deg", "PAROL6_MANUAL_HOME", "PAROL6_RAW_JOG_STARTED", "PAROL6_HOLD_STARTED", "PAROL6_MOTOR_HOLD", "PAROL6_HOME_LIMIT_SAVED", "coast_release", "servo_hold_disabled", "PAROL6_STATUS", "PAROL6_CALIBRATION", "operator_stop"):
+    for required in ("0.8.11-calibration-rc", "servo_signal=push_pull_3v3", "servo_clock_max_hz=J1:500,J2:350", "servo_pulse_us=1000", "j2_lift_accel_max_pulses_s2=900", "j2_servo_ma=local_1600_initial", "motor_hold=host_supervised", "servo_hold=disabled", "home_sequence=J2,J3,J4,J6,J5", "home_style=standard_two_pass_adapted", "limit_test=max,max_minus_10", "mechanical_home_map=J2:PG10,J3:PG12,J5:PG9", "home_limits=J2:J3:auto_zero_boundary", "home_initial_release_max_mdeg=30000", "j1_home=sensor_or_manual_temporary", "j1_limits_mdeg=-230000:35000", "j6_limits_mdeg=-180000:180000", "j1_limits_hardcoded", "j6_limits_hardcoded", "limits_fixed=-230000:35000", "manual_zero=j1_runtime_only", "calibration=dual_slot_crc32c", "soft_limits=firmware_enforced", "direction_discovery=raw_2deg", "PAROL6_MANUAL_HOME", "PAROL6_RAW_JOG_STARTED", "PAROL6_LIMIT_TEST_STARTED", "PAROL6_HOLD_STARTED", "PAROL6_MOTOR_HOLD", "PAROL6_HOME_LIMIT_SAVED", "coast_release", "servo_hold_disabled", "PAROL6_STATUS", "PAROL6_CALIBRATION", "operator_stop"):
         if required not in firmware_strings:
             raise RuntimeError(f"motion RC identity string absent: {required}")
     print("PAROL6 calibration RC verification passed: J1 temporary manual zero, retained sensor homing, dual-slot calibration, captured soft limits, and preserved motion interlocks")
