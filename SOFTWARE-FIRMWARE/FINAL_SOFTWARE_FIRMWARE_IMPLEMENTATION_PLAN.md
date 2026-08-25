@@ -552,6 +552,16 @@ Each joint uses this bounded state sequence:
 8. Move to the configured standby angle at commissioning speed.
 9. Record duration, travel, first/second latch difference, and faults.
 
+Owner-selected J2/J3 commissioning behavior: both joints may start with their
+mechanical switches active because they rest at home. An active input at startup
+is never sufficient to declare the axis homed; the release and slow re-latch
+sequence remains mandatory. The repeatable latch edge is recorded as 0 degrees
+and automatically stored as the minimum or maximum according to the configured
+joint-positive and home directions. The operator captures only the opposite
+limit. Motion away from an active, already-validated J2/J3 home input may clear
+that input normally; a transition toward home or a re-trigger still aborts
+motion.
+
 Initial completed-robot sequence: J1, J2, J3, J4, J6, J5, one joint at a time with the arm supported as needed. Only after collision and gravity tests may J1-J3 be evaluated for safe parallel homing. Never copy the upstream firmware's defective homing state assignments.
 
 ### 7.9 Voltage, temperature, I/O, and gripper

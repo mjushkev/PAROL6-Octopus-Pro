@@ -249,6 +249,15 @@ bool maximum_is_set(std::size_t axis) {
   return joint_flag(axis, parol6::calibration::kMaximumSet);
 }
 
+bool home_is_logical_positive(std::size_t axis) {
+  return home_direction_positive[axis] ==
+         positive_direction_raw_positive[axis];
+}
+
+bool has_automatic_home_boundary(std::size_t axis) {
+  return axis == 1U || axis == 2U;  // J2 and J3 rest at their home switches.
+}
+
 bool logical_target_is_safe(std::size_t axis, std::int32_t target) {
   const auto& joint = calibration_record.joints[axis];
   return (!minimum_is_set(axis) || target >= joint.minimum_millidegrees) &&
@@ -491,6 +500,7 @@ void print_ready() {
                "motor_hold=host_supervised servo_hold=disabled "
                "home_sequence=J2,J3,J4,J6,J5 "
                "mechanical_home_map=J2:PG10,J3:PG12,J5:PG9 "
+               "home_limits=J2:J3:auto_zero_boundary "
                "j1_home=sensor_or_manual_temporary "
                "j1_limits_mdeg=-230000:35000 "
                "calibration=dual_slot_crc32c soft_limits=firmware_enforced "
@@ -846,6 +856,22 @@ bool home_sensor_active(std::size_t axis) {
   return stop_states[axis].stable == home_active_level[axis];
 }
 
+bool guarded_axis_sensor_changed(std::size_t axis) {
+  if (stop_states[axis].stable == motion.initial_axis_sensor) return false;
+
+  // J2/J3 normally begin at the active home switch. Once referenced, permit
+  // exactly the active-to-clear transition while jogging away from home. Any
+  // transition toward home, or any later re-trigger, remains a motion abort.
+  const bool moving_away = motion.positive != home_is_logical_positive(axis);
+  if (has_automatic_home_boundary(axis) && homed[axis] && moving_away &&
+      motion.initial_axis_sensor == home_active_level[axis] &&
+      !home_sensor_active(axis)) {
+    motion.initial_axis_sensor = stop_states[axis].stable;
+    return false;
+  }
+  return true;
+}
+
 void print_home_phase(std::size_t axis, const char* phase) {
   Serial.print("PAROL6_HOME_PHASE joint=J");
   Serial.print(axis + 1U);
@@ -928,9 +954,44 @@ void start_home(std::size_t axis) {
                                             : HomePhase::fast_seek);
 }
 
+bool persist_calibration();
+
+bool apply_automatic_home_boundary(std::size_t axis) {
+  if (!has_automatic_home_boundary(axis)) return true;
+  auto& joint = calibration_record.joints[axis];
+  const bool minimum = !home_is_logical_positive(axis);
+  const bool changed = minimum
+      ? (!minimum_is_set(axis) || joint.minimum_millidegrees != 0)
+      : (!maximum_is_set(axis) || joint.maximum_millidegrees != 0);
+  if (minimum) {
+    joint.minimum_millidegrees = 0;
+    set_joint_flag(axis, parol6::calibration::kMinimumSet, true);
+  } else {
+    joint.maximum_millidegrees = 0;
+    set_joint_flag(axis, parol6::calibration::kMaximumSet, true);
+  }
+  if (changed) {
+    if (!persist_calibration()) return false;
+    rotate_token();
+  }
+  Serial.print("PAROL6_HOME_LIMIT_SAVED joint=J");
+  Serial.print(axis + 1U);
+  Serial.print(" kind=");
+  Serial.print(minimum ? "MIN" : "MAX");
+  Serial.print(" position_mdeg=0 automatic=1 changed=");
+  Serial.print(changed ? 1 : 0);
+  Serial.print(" sequence=");
+  Serial.print(calibration_record.sequence);
+  Serial.print(" token=");
+  print_token(command_token);
+  Serial.print("\r\n");
+  print_joint_calibration(axis);
+  return true;
+}
+
 void service_jog() {
   const std::size_t axis = motion.axis;
-  if (stop_states[axis].stable != motion.initial_axis_sensor ||
+  if (guarded_axis_sensor_changed(axis) ||
       stop_states[6].stable != motion.initial_other_stops[0] ||
       stop_states[7].stable != motion.initial_other_stops[1]) {
     end_motion("limit_abort");
@@ -943,7 +1004,7 @@ void service_jog() {
 
 void service_hold() {
   const std::size_t axis = motion.axis;
-  if (stop_states[axis].stable != motion.initial_axis_sensor ||
+  if (guarded_axis_sensor_changed(axis) ||
       stop_states[6].stable != motion.initial_other_stops[0] ||
       stop_states[7].stable != motion.initial_other_stops[1]) {
     end_motion("limit_abort");
@@ -1000,6 +1061,10 @@ void service_home() {
         stepper.setCurrentPosition(0L);
         homed[axis] = true;
         manual_home_temporary[axis] = false;
+        if (!apply_automatic_home_boundary(axis)) {
+          homed[axis] = false;
+          return;
+        }
         end_motion("complete");
         return;
       }
@@ -1124,6 +1189,11 @@ bool capture_joint_limit(std::size_t axis, bool minimum) {
   }
   if (!homed[axis]) {
     error("axis_not_homed");
+    return false;
+  }
+  if (has_automatic_home_boundary(axis) &&
+      minimum == !home_is_logical_positive(axis)) {
+    error("home_boundary_is_automatic");
     return false;
   }
   const std::int32_t position = joint_position_millidegrees(axis);

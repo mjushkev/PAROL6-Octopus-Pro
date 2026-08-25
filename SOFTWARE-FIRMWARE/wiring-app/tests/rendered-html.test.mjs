@@ -13,7 +13,7 @@ test("renders the simplified PAROL6 joint calibration workbench", async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Set up one joint at a time/i);
-  assert.match(html, /Test direction → save → home → set limits/i);
+  assert.match(html, /Test direction → save → home → set the far limit/i);
   assert.match(html, /Connect USB/i);
   assert.match(html, /Enable setup motion/i);
   assert.match(html, /Test raw −/i);

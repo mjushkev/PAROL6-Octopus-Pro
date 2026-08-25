@@ -86,6 +86,15 @@ Owner observation on 2026-08-25 before remapping: physical J2 appeared as J3,
 physical J3 appeared as J5, and physical J5 appeared as J2. Firmware 0.8.5 and
 later apply the inverse mapping so the host software sees the correct joint.
 
+**Owner homing amendment — 2026-08-25:** J2 and J3 normally rest with their
+mechanical home switches active. Firmware 0.8.6 and later must not accept an
+active input alone as proof of home. It performs an active-start release,
+bounded seek, backoff, and slow re-latch. The repeatable latch edge is 0 degrees
+and automatically becomes the home-side soft limit for J2/J3. The operator
+captures only the opposite travel limit. The calibration JSON retains the raw
+home direction, raw logical-positive direction, derived joint-space home
+direction, and automatic home-limit side.
+
 This is a hybrid motor-control arrangement: J1-J2 use MKS SERVO42C hardware
 with magnetic encoder feedback, while J3-J6 use TMC2209 drivers. The J1-J2
 encoders close the loop at the motor shaft; they can improve motor-position
