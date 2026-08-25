@@ -1,6 +1,6 @@
 # PAROL6 joint calibration release candidate
 
-Version `0.8.2-calibration-rc` provides direct-USB manual control, fixed raw
+Version `0.8.8-calibration-rc` provides direct-USB manual control, fixed raw
 direction-discovery moves, a temporary manual reference for J1 while its sensor
 is unavailable, guarded sensor homing for J2-J6, retained direction
 configuration, captured firmware soft limits, and JSON export. The Site is a
@@ -83,8 +83,11 @@ moving the robot. It does not affect the other five joints.
 - The host must contact the controller at least every two seconds while moving
   or holding torque. Loss of browser focus, Web Serial, heartbeat, hold
   keepalive, a guarded sensor transition, or STOP disables motion.
-- J3-J5 remain at 700 mA RMS and J6 at 450 mA RMS. J1/J2 retain the proven
-  1,000 µs active-low clock pulse and temporary 500 pulse/s ceiling.
+- J3-J5 remain at 700 mA RMS and J6 at 450 mA RMS. J1 retains the proven
+  1,000 µs active-low clock pulse and 500 pulse/s ceiling. Gravity-loaded J2
+  uses the same pulse width with a 350 pulse/s speed ceiling and a 900
+  pulse/s^2 acceleration ceiling. J2 current is local to the Servo42C; begin
+  `CR_OPEN` testing at `Ma=1600 mA` with `MStep=32`.
 - Absolute tracked-angle containment remains ±360° even before a side-specific
   limit is captured. This is not permission to approach cable or mechanical
   stops.

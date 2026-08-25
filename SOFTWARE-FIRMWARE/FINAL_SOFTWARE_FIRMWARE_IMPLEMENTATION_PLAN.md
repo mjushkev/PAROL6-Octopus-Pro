@@ -508,9 +508,15 @@ Target settings after HV-02:
 - Mode: local open-loop STEP/DIR (`CR_OPEN`). Set this independently on both
   Servo42C boards using their onboard menu; the Octopus cannot change the
   board-local mode through STEP/DIR.
-- Logical microstep setting: 32.
+- Logical microstep setting: 32. This must remain aligned with J1/J2's stored
+  pulses-per-degree conversion.
 - Supply: switched 24 V motor bus, within the board's verified input range.
-- Current: tuned for the 2 A/phase `17HE19-2004S`; never assume the module's maximum setting is appropriate.
+- Current: for J2 gravity-lift commissioning, begin with Servo42C `Ma=1600 mA`
+  in `CR_OPEN`. Increase only after loaded motion and temperature checks, never
+  above the motor's 2 A/phase rating. The Octopus STEP/DIR interface cannot set
+  this board-local current.
+- J2 pulse demand: maximum 350 pulses/s and 900 pulses/s^2 during initial lift
+  commissioning; this is about 0.98 joint degrees/s at 356 pulses/degree.
 - J1 UART address: 1; J2 UART address: 2.
 - UART: 38,400 baud, 8N1, exact checksum/response behavior captured in a golden trace.
 - Control signals: use a small keyed interface board from MOTOR0/MOTOR1 logic pins. Do not install plug-in drivers in those slots and do not use the Octopus A/B motor output terminals.

@@ -24,7 +24,10 @@ constexpr std::uint32_t kTmcBaud = 115200U;
 constexpr std::array<std::uint16_t, 6> kRunCurrentMa = {
     0U, 0U, 700U, 700U, 700U, 450U};
 constexpr std::uint16_t kMicrosteps = 16U;
-constexpr float kServoMaximumPulseRate = 500.0F;
+// J2 is gravity-loaded. Its Servo42C current is configured locally, so the
+// Octopus improves lift margin by demanding less speed and acceleration.
+constexpr std::array<float, 2> kServoMaximumPulseRate = {500.0F, 350.0F};
+constexpr float kJ2MaximumPulseAcceleration = 900.0F;
 constexpr std::uint16_t kServoPulseWidthUs = 1000U;
 constexpr std::uint16_t kTmcPulseWidthUs = 8U;
 constexpr float kSenseResistorOhms = 0.11F;
@@ -468,12 +471,16 @@ void apply_profile(std::size_t axis, const MotionProfile& profile,
   auto& stepper = *steppers[axis];
   float maximum_pulse_rate = profile.max_degrees_per_second * speed_scale *
                              kPulsesPerDegree[axis];
-  if (axis < 2U && maximum_pulse_rate > kServoMaximumPulseRate) {
-    maximum_pulse_rate = kServoMaximumPulseRate;
+  if (axis < 2U && maximum_pulse_rate > kServoMaximumPulseRate[axis]) {
+    maximum_pulse_rate = kServoMaximumPulseRate[axis];
   }
   stepper.setMaxSpeed(maximum_pulse_rate);
-  stepper.setAcceleration(profile.acceleration_degrees_per_second2 *
-                          speed_scale * kPulsesPerDegree[axis]);
+  float acceleration = profile.acceleration_degrees_per_second2 * speed_scale *
+                       kPulsesPerDegree[axis];
+  if (axis == 1U && acceleration > kJ2MaximumPulseAcceleration) {
+    acceleration = kJ2MaximumPulseAcceleration;
+  }
+  stepper.setAcceleration(acceleration);
   stepper.setMinPulseWidth(axis < 2U ? kServoPulseWidthUs : kTmcPulseWidthUs);
 }
 
@@ -483,20 +490,25 @@ void apply_hold_profile(std::size_t axis, std::int32_t speed_mdeg_per_second,
   const float degrees_per_second =
       static_cast<float>(speed_mdeg_per_second) / 1000.0F;
   float maximum_pulse_rate = degrees_per_second * kPulsesPerDegree[axis];
-  if (axis < 2U && maximum_pulse_rate > kServoMaximumPulseRate) {
-    maximum_pulse_rate = kServoMaximumPulseRate;
+  if (axis < 2U && maximum_pulse_rate > kServoMaximumPulseRate[axis]) {
+    maximum_pulse_rate = kServoMaximumPulseRate[axis];
   }
   stepper.setMaxSpeed(maximum_pulse_rate);
-  stepper.setAcceleration(profile.acceleration_degrees_per_second2 *
-                          kPulsesPerDegree[axis]);
+  float acceleration =
+      profile.acceleration_degrees_per_second2 * kPulsesPerDegree[axis];
+  if (axis == 1U && acceleration > kJ2MaximumPulseAcceleration) {
+    acceleration = kJ2MaximumPulseAcceleration;
+  }
+  stepper.setAcceleration(acceleration);
   stepper.setMinPulseWidth(axis < 2U ? kServoPulseWidthUs : kTmcPulseWidthUs);
 }
 
 void print_ready() {
   Serial.print("PAROL6_MOTION_RC_READY version=" PAROL6_FIRMWARE_VERSION
                " board=OCTOPUS_PRO_V1_1_H723 joints=6 stops=8 adc=5 "
-               "servo_signal=push_pull_3v3 servo_clock_max_hz=500 "
+               "servo_signal=push_pull_3v3 servo_clock_max_hz=J1:500,J2:350 "
                "servo_pulse_us=1000 profiles=GENTLE,NORMAL,BRISK "
+               "j2_lift_accel_max_pulses_s2=900 j2_servo_ma=local_1600_initial "
                "hold_speed_mdeg_s=3000-45000 hold_cap_mdeg=45000 "
                "motor_hold=host_supervised servo_hold=disabled "
                "home_sequence=J2,J3,J4,J6,J5 "

@@ -196,7 +196,7 @@ const ports: Port[] = [
   },
   {
     id: "usb", label: "USB-C", item: "Primary PC control and service link", status: "mapped",
-    x: 82.0, y: 24.7, w: 6.5, h: 9.5, pins: "USB-C · PA11 D− / PA12 D+", wiring: ["Leave the ESP completely disconnected", "Keep the VUSB jumper removed when external 24 V is connected", "Connect a known-good USB data cable directly from the PC → Octopus USB-C", "Use the joint setup console; every mutable command requires a fresh token"], note: "USB is the primary transport. Calibration RC 0.8.7 maps the as-built mechanical inputs and handles J2/J3 resting on active home switches: it moves opposite Home until clear, stopping immediately, with a 30° failure ceiling. The repeatable latch becomes the automatic 0° home-side limit. Support gravity-loaded J2. Remove USB before changing any jumper or connector.",
+    x: 82.0, y: 24.7, w: 6.5, h: 9.5, pins: "USB-C · PA11 D− / PA12 D+", wiring: ["Leave the ESP completely disconnected", "Keep the VUSB jumper removed when external 24 V is connected", "Connect a known-good USB data cable directly from the PC → Octopus USB-C", "Use the joint setup console; every mutable command requires a fresh token"], note: "USB is the primary transport. Calibration RC 0.8.8 retains corrected J2/J3 active-switch homing and adds a slower, gentler J2 lift profile. J2 Servo42C current remains a local hardware setting: start at Ma 1600 in CR_OPEN. Support gravity-loaded J2. Remove USB before changing any jumper or connector.",
   },
   {
     id: "usb-a", label: "USB-A", item: "Unused USB host/OTG connector", status: "unused",

@@ -100,6 +100,13 @@ degrees. This is not a commanded fixed travel: motion remains opposite the
 configured home direction and stops immediately when the debounced input
 clears. Reaching the ceiling while still active stops homing with a fault.
 
+Firmware 0.8.8 adds a J2 gravity-lift profile: a 350 pulse/s ceiling (about
+0.98 joint degrees/s at 356 pulses/degree) and a 900 pulse/s^2 acceleration
+ceiling. Servo42C current remains local in `CR_OPEN`; the first owner test uses
+`Ma=1600 mA`, with `MStep=32`, active-low enable, and Servo42C ACC disabled.
+Do not exceed the 2.0 A/phase motor rating or increase current without staged
+temperature checks, especially in the owner's PLA+ structure.
+
 This is a hybrid motor-control arrangement: J1-J2 use MKS SERVO42C hardware
 with magnetic encoder feedback, while J3-J6 use TMC2209 drivers. The J1-J2
 encoders close the loop at the motor shaft; they can improve motor-position

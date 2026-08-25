@@ -21,7 +21,7 @@ class MotionRcFirmwareSourceTests(unittest.TestCase):
     def test_project_is_bootloader_bounded_and_versioned(self) -> None:
         self.assertIn("board_build.flash_offset = 0x20000", self.ini)
         self.assertIn("board_upload.maximum_size = 262144", self.ini)
-        self.assertIn("0.8.2-calibration-rc", self.ini)
+        self.assertIn("0.8.8-calibration-rc", self.ini)
 
     def test_all_owner_selected_joint_and_sensor_pins_are_present(self) -> None:
         for pin in (
@@ -98,7 +98,7 @@ class MotionRcFirmwareSourceTests(unittest.TestCase):
         self.assertIn("PAROL6_MANUAL_HOME", self.source)
         self.assertIn("manual_home_temporary", self.source)
         self.assertIn("manual_zero=j1_runtime_only", self.source)
-        self.assertIn("limits_reset=1 temporary=1", self.source)
+        self.assertIn("limits_fixed=-230000:35000 temporary=1", self.source)
 
     def test_joint_directions_and_soft_limits_are_firmware_enforced(self) -> None:
         self.assertIn("positive_direction_raw_positive", self.source)
@@ -132,7 +132,9 @@ class MotionRcFirmwareSourceTests(unittest.TestCase):
     def test_driver_current_faults_and_servo_signal_mode_are_preserved(self) -> None:
         self.assertIn("0U, 0U, 700U, 700U, 700U, 450U", self.source)
         self.assertIn("driver.rms_current(kRunCurrentMa[axis], 0.35F)", self.source)
-        self.assertIn("kServoMaximumPulseRate = 500.0F", self.source)
+        self.assertIn("kServoMaximumPulseRate = {500.0F, 350.0F}", self.source)
+        self.assertIn("kJ2MaximumPulseAcceleration = 900.0F", self.source)
+        self.assertIn("axis == 1U && acceleration > kJ2MaximumPulseAcceleration", self.source)
         self.assertIn("kServoPulseWidthUs = 1000U", self.source)
         self.assertIn("axis < 2U ? kServoPulseWidthUs : kTmcPulseWidthUs", self.source)
         self.assertIn("kExpectedTmcVersion = 0x21U", self.source)
