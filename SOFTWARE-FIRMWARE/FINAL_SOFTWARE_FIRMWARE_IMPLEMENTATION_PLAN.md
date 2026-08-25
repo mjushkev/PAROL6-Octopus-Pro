@@ -393,10 +393,10 @@ This table is the target logical map. The official V1.1 schematic and continuity
 | J5 TMC UART | MOTOR4 UART | PF2 | One-wire UART |
 | J6 TMC UART | MOTOR5 UART | PE4 | One-wire UART |
 | J1 home | STOP0 | PG6 | M5 NPN-NO through optocoupler channel 1 |
-| J2 home | STOP1 | PG9 | ZW12-3 dry NC contact |
-| J3 home | STOP2 | PG10 | ZW12-3 dry NC contact |
+| J2 home | STOP2 | PG10 | ZW12-3 dry NC contact; owner-verified as-built override |
+| J3 home | STOP4 | PG12 | ZW12-3 dry NC contact; owner-verified as-built override |
 | J4 home | STOP3 | PG11 | 4 mm NPN-NO through optocoupler channel 2 |
-| J5 home | STOP4 | PG12 | ZW12-3 dry NC contact |
+| J5 home | STOP1 | PG9 | ZW12-3 dry NC contact; owner-verified as-built override |
 | J6 home | STOP5 | PG13 | GX-F8A through optocoupler channel 3 |
 | Spare limit/DI | STOP6 | PG14 | Reserved, normally unpopulated |
 | Motor-contactor feedback | STOP7 | PG15 | Through optocoupler channel 4 |
@@ -534,10 +534,10 @@ The stock physical arrangement is:
 | Joint | Sensor | Normal electrical strategy | Target STOP input |
 | --- | --- | --- | --- |
 | J1 | Threaded M5 NPN-NO inductive sensor (`Sensor 3`) | 24 V sensor through optocoupler | STOP0 / PG6 |
-| J2 | ZW12-3 mechanical switch | COM+NC dry contact to signal/GND | STOP1 / PG9 |
-| J3 | ZW12-3 mechanical switch | COM+NC dry contact to signal/GND | STOP2 / PG10 |
+| J2 | ZW12-3 mechanical switch | COM+NC dry contact to signal/GND | STOP2 / PG10 |
+| J3 | ZW12-3 mechanical switch | COM+NC dry contact to signal/GND | STOP4 / PG12 |
 | J4 | 4 mm NPN-NO inductive sensor (`Sensor 2`) | 24 V sensor through optocoupler | STOP3 / PG11 |
-| J5 | ZW12-3 mechanical switch | COM+NC dry contact to signal/GND | STOP4 / PG12 |
+| J5 | ZW12-3 mechanical switch | COM+NC dry contact to signal/GND | STOP1 / PG9 |
 | J6 | GX-F8A flat inductive sensor (`Sensor 1`) | 24 V sensor through optocoupler | STOP5 / PG13 |
 
 Each joint uses this bounded state sequence:

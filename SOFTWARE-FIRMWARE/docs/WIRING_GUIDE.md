@@ -140,15 +140,15 @@ connectors are selected.
 | J6-M | J6 motor to Octopus MOTOR5 | Two measured coil pairs, four conductors | Route after motor ID |
 | J6-H | J6 inductive sensor to optocoupler | +24 V, 0 V, NPN signal | Route after sensor ID |
 | J5-M | J5 motor to Octopus MOTOR4 | Two measured coil pairs, four conductors | Route after motor ID |
-| J5-H | J5 mechanical NC switch to STOP4 | COM/GND and NC/signal | May route unpowered |
+| J5-H | J5 mechanical NC switch to STOP1 | COM/GND and NC/signal | Owner-verified as-built assignment; may route unpowered |
 | J4-M | J4 motor to Octopus MOTOR3 | Two measured coil pairs, four conductors | Route after motor ID |
 | J4-H | J4 inductive sensor to optocoupler | +24 V, 0 V, NPN signal | Route after sensor ID |
 | J3-M | J3 motor to Octopus MOTOR2 | Two measured coil pairs, four conductors | Route after motor ID |
-| J3-H | J3 mechanical NC switch to STOP2 | COM/GND and NC/signal | May route unpowered |
+| J3-H | J3 mechanical NC switch to STOP4 | COM/GND and NC/signal | Owner-verified as-built assignment; may route unpowered |
 | J2-P | Switched bus to J2 Servo42C | +24 V and 0 V, individually fused | Gauge/fuse blocked by HV-07 |
 | J2-C | Octopus interface to J2 Servo42C | COM, STEP, DIR, EN | Interface blocked by HV-02 |
 | J2-T | Servo42C telemetry | TX, RX, logic GND | Blocked by HV-02 |
-| J2-H | J2 mechanical NC switch to STOP1 | COM/GND and NC/signal | May route unpowered |
+| J2-H | J2 mechanical NC switch to STOP2 | COM/GND and NC/signal | Owner-verified as-built assignment; may route unpowered |
 | J1-P | Switched bus to J1 Servo42C | +24 V and 0 V, individually fused | Gauge/fuse blocked by HV-07 |
 | J1-C | Octopus interface to J1 Servo42C | COM, STEP, DIR, EN | Interface blocked by HV-02 |
 | J1-T | Servo42C telemetry | TX, RX, logic GND | Blocked by HV-02 |
@@ -249,10 +249,10 @@ owner's exact board before termination.
 | J5 motor/driver | MOTOR4 | PF9/PF10/PG2, UART PF2 | TMC2209 + measured coil pairs |
 | J6 motor/driver | MOTOR5 | PC13/PF0/PF1, UART PE4 | TMC2209 + measured coil pairs |
 | J1 home | STOP0 | PG6 | Optocoupler Q1 only |
-| J2 home | STOP1 | PG9 | Mechanical NC dry contact |
-| J3 home | STOP2 | PG10 | Mechanical NC dry contact |
+| J2 home | STOP2 | PG10 | Mechanical NC dry contact; owner-verified as built |
+| J3 home | STOP4 | PG12 | Mechanical NC dry contact; owner-verified as built |
 | J4 home | STOP3 | PG11 | Optocoupler Q2 only |
-| J5 home | STOP4 | PG12 | Mechanical NC dry contact |
+| J5 home | STOP1 | PG9 | Mechanical NC dry contact; owner-verified as built |
 | J6 home | STOP5 | PG13 | Optocoupler Q3 only |
 | Contactor feedback | STOP7 | PG15 | Optocoupler Q4 only |
 | USB PC link | Board USB-C device port | PA11 D- / PA12 D+ | Primary control/service transport; use a data cable |
@@ -354,7 +354,7 @@ With power disconnected:
 5. Route as a paired cable away from motor phases.
 6. Record both normal and actuated resistance at the base end.
 
-Assignments: J2 -> STOP1, J3 -> STOP2, J5 -> STOP4.
+Owner-verified as-built assignments: J2 -> STOP2, J3 -> STOP4, J5 -> STOP1.
 
 ### NPN-NO inductive sensors: J1, J4, J6
 
@@ -499,7 +499,7 @@ Create an as-built connector table before closing the base:
 
 | Connector ID | Pin | Signal | From | To | Wire label/color | Verified by |
 | --- | ---: | --- | --- | --- | --- | --- |
-| Example only | 1 | J5 switch NC | J5-H | STOP4 signal | Record actual | PENDING |
+| Example only | 1 | J5 switch NC | J5-H | STOP1 signal | Record actual | PENDING |
 
 ## 16. First-power sequence - future hold point
 

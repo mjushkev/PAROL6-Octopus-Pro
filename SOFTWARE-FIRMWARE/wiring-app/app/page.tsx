@@ -23,10 +23,10 @@ const fanPins = ["PA8", "PE5", "PD12", "PD13", "PD14", "PD15", "Always on", "Alw
 
 const stopAssignments = [
   { label: "STOP0", item: "J1 inductive home", pin: "PG6", wire: "Optocoupler Q1 output → PG6; Q1 logic ground → GND", status: "blocked" as const, note: "The M5 24 V NPN-NO sensor must feed Q1. Never put the sensor's 24 V signal on this header." },
-  { label: "STOP1", item: "J2 mechanical home", pin: "PG9", wire: "ZW12-3 COM → GND; NC → PG9", status: "mapped" as const, note: "Meter COM/NC before crimping and leave the header's 5 V pin unused." },
-  { label: "STOP2", item: "J3 mechanical home", pin: "PG10", wire: "ZW12-3 COM → GND; NC → PG10", status: "mapped" as const, note: "Meter COM/NC before crimping and leave the header's 5 V pin unused." },
+  { label: "STOP1", item: "J5 mechanical home", pin: "PG9", wire: "J5 ZW12-3 COM → GND; NC → PG9", status: "mapped" as const, note: "Owner-verified as-built routing; firmware reports this input as logical J5." },
+  { label: "STOP2", item: "J2 mechanical home", pin: "PG10", wire: "J2 ZW12-3 COM → GND; NC → PG10", status: "mapped" as const, note: "Owner-verified as-built routing; firmware reports this input as logical J2." },
   { label: "STOP3", item: "J4 inductive home", pin: "PG11", wire: "Optocoupler Q2 output → PG11; Q2 logic ground → GND", status: "blocked" as const, note: "The 4 mm 24 V NPN-NO sensor must feed Q2. Never put the sensor's 24 V signal on this header." },
-  { label: "STOP4", item: "J5 mechanical home", pin: "PG12", wire: "ZW12-3 COM → GND; NC → PG12", status: "mapped" as const, note: "Meter COM/NC before crimping and leave the header's 5 V pin unused." },
+  { label: "STOP4", item: "J3 mechanical home", pin: "PG12", wire: "J3 ZW12-3 COM → GND; NC → PG12", status: "mapped" as const, note: "Owner-verified as-built routing; firmware reports this input as logical J3." },
   { label: "STOP5", item: "J6 inductive home", pin: "PG13", wire: "Optocoupler Q3 output → PG13; Q3 logic ground → GND", status: "blocked" as const, note: "The GX-F8A 24 V NPN-NO sensor must feed Q3. Never put the sensor's 24 V signal on this header." },
   { label: "STOP6", item: "Unused input", pin: "PG14", wire: "Leave the connector empty", status: "unused" as const, note: "Reserved for future reviewed expansion." },
   { label: "STOP7", item: "Contactor auxiliary feedback", pin: "PG15", wire: "Optocoupler Q4 output → PG15; Q4 logic ground → GND", status: "blocked" as const, note: "Use only a mechanically linked contactor auxiliary contact through the reviewed isolated Q4 circuit." },
@@ -196,7 +196,7 @@ const ports: Port[] = [
   },
   {
     id: "usb", label: "USB-C", item: "Primary PC control and service link", status: "mapped",
-    x: 82.0, y: 24.7, w: 6.5, h: 9.5, pins: "USB-C · PA11 D− / PA12 D+", wiring: ["Leave the ESP completely disconnected", "Keep the VUSB jumper removed when external 24 V is connected", "Connect a known-good USB data cable directly from the PC → Octopus USB-C", "Use the joint setup console; every mutable command requires a fresh token"], note: "USB is the primary transport. Calibration RC 0.8.4 releases J1/J2 Servo42C torque after hold-to-jog and enforces fixed J1 limits of −230° to +35° from temporary manual zero. Support gravity-loaded J2. Remove USB before changing any jumper or connector.",
+    x: 82.0, y: 24.7, w: 6.5, h: 9.5, pins: "USB-C · PA11 D− / PA12 D+", wiring: ["Leave the ESP completely disconnected", "Keep the VUSB jumper removed when external 24 V is connected", "Connect a known-good USB data cable directly from the PC → Octopus USB-C", "Use the joint setup console; every mutable command requires a fresh token"], note: "USB is the primary transport. Calibration RC 0.8.5 maps the as-built mechanical inputs as J2→PG10, J3→PG12, and J5→PG9; it retains stable Servo42C release and J1 limits of −230° to +35°. Support gravity-loaded J2. Remove USB before changing any jumper or connector.",
   },
   {
     id: "usb-a", label: "USB-A", item: "Unused USB host/OTG connector", status: "unused",

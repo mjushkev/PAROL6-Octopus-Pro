@@ -70,6 +70,22 @@ values elsewhere in this document for comparison and design adaptation.
 | Joint 6 driver | BIGTREETECH TMC2209 |
 | Gripper | Deferred from the current control-software scope; planned MG90S 360-degree servo motor |
 
+### Owner-verified as-built home-input routing
+
+The assembled robot's three mechanical home-switch cables are intentionally
+handled in firmware with this verified physical routing. This overrides older
+plan and guide tables that assigned J2/J3/J5 sequentially to STOP1/STOP2/STOP4.
+
+| Physical joint switch | Octopus connector | MCU pin | Firmware logical input |
+| --- | --- | --- | --- |
+| J2 | STOP2 | PG10 | J2 |
+| J3 | STOP4 | PG12 | J3 |
+| J5 | STOP1 | PG9 | J5 |
+
+Owner observation on 2026-08-25 before remapping: physical J2 appeared as J3,
+physical J3 appeared as J5, and physical J5 appeared as J2. Firmware 0.8.5 and
+later apply the inverse mapping so the host software sees the correct joint.
+
 This is a hybrid motor-control arrangement: J1-J2 use MKS SERVO42C hardware
 with magnetic encoder feedback, while J3-J6 use TMC2209 drivers. The J1-J2
 encoders close the loop at the motor shaft; they can improve motor-position

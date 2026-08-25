@@ -59,6 +59,7 @@ def verify_firmware(source, target, env):
         "maximum_soft_limit", "minimum_soft_limit", "print_calibration",
         "kJ1HardMinimumMilliDegrees = -230000",
         "kJ1HardMaximumMilliDegrees = 35000", "apply_j1_hardcoded_limits",
+        "PG6, PG10, PG12, PG11, PG9, PG13",
     ):
         if invariant not in application:
             raise RuntimeError(f"motion RC safety invariant absent: {invariant}")
@@ -85,7 +86,7 @@ def verify_firmware(source, target, env):
         if required not in symbols:
             raise RuntimeError(f"motion RC required symbol absent: {required}")
     firmware_strings = subprocess.check_output([str(strings), str(elf_path)], text=True)
-    for required in ("0.8.4-calibration-rc", "servo_signal=push_pull_3v3", "servo_clock_max_hz=500", "servo_pulse_us=1000", "motor_hold=host_supervised", "servo_hold=disabled", "home_sequence=J2,J3,J4,J6,J5", "j1_home=sensor_or_manual_temporary", "j1_limits_mdeg=-230000:35000", "j1_limits_hardcoded", "limits_fixed=-230000:35000", "manual_zero=j1_runtime_only", "calibration=dual_slot_crc32c", "soft_limits=firmware_enforced", "direction_discovery=raw_2deg", "PAROL6_MANUAL_HOME", "PAROL6_RAW_JOG_STARTED", "PAROL6_HOLD_STARTED", "PAROL6_MOTOR_HOLD", "coast_release", "servo_hold_disabled", "PAROL6_STATUS", "PAROL6_CALIBRATION", "operator_stop"):
+    for required in ("0.8.5-calibration-rc", "servo_signal=push_pull_3v3", "servo_clock_max_hz=500", "servo_pulse_us=1000", "motor_hold=host_supervised", "servo_hold=disabled", "home_sequence=J2,J3,J4,J6,J5", "mechanical_home_map=J2:PG10,J3:PG12,J5:PG9", "j1_home=sensor_or_manual_temporary", "j1_limits_mdeg=-230000:35000", "j1_limits_hardcoded", "limits_fixed=-230000:35000", "manual_zero=j1_runtime_only", "calibration=dual_slot_crc32c", "soft_limits=firmware_enforced", "direction_discovery=raw_2deg", "PAROL6_MANUAL_HOME", "PAROL6_RAW_JOG_STARTED", "PAROL6_HOLD_STARTED", "PAROL6_MOTOR_HOLD", "coast_release", "servo_hold_disabled", "PAROL6_STATUS", "PAROL6_CALIBRATION", "operator_stop"):
         if required not in firmware_strings:
             raise RuntimeError(f"motion RC identity string absent: {required}")
     print("PAROL6 calibration RC verification passed: J1 temporary manual zero, retained sensor homing, dual-slot calibration, captured soft limits, and preserved motion interlocks")

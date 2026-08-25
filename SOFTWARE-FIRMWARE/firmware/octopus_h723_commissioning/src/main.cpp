@@ -54,7 +54,9 @@ constexpr std::array<std::uint32_t, 6> kDirectionPins = {
 constexpr std::array<std::uint32_t, 6> kEnablePins = {
     PF14, PF15, PG5, PA2, PG2, PF1};
 constexpr std::array<std::uint32_t, 6> kHomePins = {
-    PG6, PG9, PG10, PG11, PG12, PG13};
+    // Owner-verified as-built mechanical switch cycle:
+    // physical J2 -> STOP2, physical J3 -> STOP4, physical J5 -> STOP1.
+    PG6, PG10, PG12, PG11, PG9, PG13};
 constexpr std::array<std::uint32_t, 2> kOtherStopPins = {PG14, PG15};
 constexpr std::array<std::uint32_t, 4> kTemperaturePins = {PF4, PF5, PF6, PF7};
 constexpr std::uint32_t kPowerDetectPin = PC0;
@@ -488,6 +490,7 @@ void print_ready() {
                "hold_speed_mdeg_s=3000-45000 hold_cap_mdeg=45000 "
                "motor_hold=host_supervised servo_hold=disabled "
                "home_sequence=J2,J3,J4,J6,J5 "
+               "mechanical_home_map=J2:PG10,J3:PG12,J5:PG9 "
                "j1_home=sensor_or_manual_temporary "
                "j1_limits_mdeg=-230000:35000 "
                "calibration=dual_slot_crc32c soft_limits=firmware_enforced "
