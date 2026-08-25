@@ -1658,6 +1658,10 @@ void handle_line(char* command) {
       error("home_preflight_failed");
       return;
     }
+    // A TMC joint can remain energized after hold-to-jog release. Without
+    // transferring that stationary hold here, service_motion() continues to
+    // service the hold and never advances the newly-created home task.
+    if (!handoff_motor_hold_to_motion(axis)) return;
     rotate_token();
     start_home(axis);
     return;
