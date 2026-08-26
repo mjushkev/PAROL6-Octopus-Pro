@@ -29,6 +29,9 @@ class CalibrationTests(unittest.TestCase):
                  item.minimum_deg, item.maximum_deg),
                 values,
             )
+        self.assertEqual(self.calibration.by_id["J5"].post_home_standby_deg, -130.0)
+        for joint in ("J1", "J2", "J3", "J4", "J6"):
+            self.assertIsNone(self.calibration.by_id[joint].post_home_standby_deg)
 
     def test_j3_direction_and_pose_limits_are_enforced(self) -> None:
         self.assertEqual(self.calibration.by_id["J3"].angle_to_raw_steps(10), -1610)

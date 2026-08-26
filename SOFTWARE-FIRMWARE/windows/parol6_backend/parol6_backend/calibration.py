@@ -29,6 +29,7 @@ class JointCalibration:
     home_behavior: str
     minimum_deg: float
     maximum_deg: float
+    post_home_standby_deg: float | None = None
 
     def validate_angle(self, angle_deg: float) -> None:
         if not self.minimum_deg <= angle_deg <= self.maximum_deg:
@@ -116,6 +117,8 @@ def load_calibration(path: str | Path) -> RobotCalibration:
             raise CalibrationError(f"{joint.joint}_invalid_sensor_level")
         if joint.minimum_deg >= joint.maximum_deg:
             raise CalibrationError(f"{joint.joint}_invalid_limits")
+        if joint.post_home_standby_deg is not None:
+            joint.validate_angle(joint.post_home_standby_deg)
     home_order = tuple(motion["home_order"])
     if set(home_order) != set(expected_ids) or len(home_order) != 6:
         raise CalibrationError("home_order_requires_each_joint_once")

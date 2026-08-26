@@ -46,7 +46,8 @@
       "joint": "J5", "name": "Wrist pitch", "motor_slot": "MOTOR4", "driver": "TMC2209",
       "pulses_per_degree": 36, "home_raw": "+", "positive_raw": "+",
       "sensor_active_level": "LOW", "home_behavior": "TWO_PASS_LATCH_ZERO",
-      "minimum_deg": -254.25, "maximum_deg": 0.0
+      "minimum_deg": -254.25, "maximum_deg": 0.0,
+      "post_home_standby_deg": -130.0
     },
     {
       "joint": "J6", "name": "Wrist rotate", "motor_slot": "MOTOR5", "driver": "TMC2209",
@@ -59,6 +60,7 @@
     "Owner-confirmed all six joints functional and calibrated on 2026-08-26.",
     "J2 physical switch maps to PG10, J3 to PG12, and J5 to PG9.",
     "J4 amendment: finish homing with a positive sensor-clear move and assign that clear position as 0 degree minimum.",
+    "J5 amendment: after the two-pass sensor latch establishes 0 degrees, move to -130 degrees as the standby position.",
     "J1 manual home remains the default until its sensor is repaired; automatic sensor home is selectable by the operator.",
     "J6 remains cable-limited to plus or minus 180 degrees and is never continuous."
   ]

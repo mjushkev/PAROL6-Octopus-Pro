@@ -15,7 +15,7 @@ class MotionRc09FirmwareSourceTests(unittest.TestCase):
     def test_release_is_bootloader_bounded_and_versioned(self) -> None:
         self.assertIn("board_build.flash_offset = 0x20000", self.ini)
         self.assertIn("board_upload.maximum_size = 262144", self.ini)
-        self.assertIn("0.9.0-motion-rc", self.ini)
+        self.assertIn("0.9.1-motion-rc", self.ini)
 
     def test_coordinated_command_requires_all_homed_and_safe_targets(self) -> None:
         self.assertIn('kCoordinatedMovePrefix[] = "COORD_MOVE "', self.source)
@@ -57,6 +57,20 @@ class MotionRc09FirmwareSourceTests(unittest.TestCase):
         self.assertIn('std::strcmp(verb, "HOME")', self.source)
         self.assertIn("j1_home=sensor_or_manual_temporary", self.source)
         self.assertNotIn("j1_home_hard_locked", self.source)
+
+    def test_j5_home_finishes_at_calibrated_standby_position(self) -> None:
+        self.assertIn("kJ5PostHomeStandbyMilliDegrees = -130000", self.source)
+        self.assertIn("HomePhase::post_home_standby", self.source)
+        self.assertIn("POST_HOME_STANDBY_MINUS_130", self.source)
+        self.assertIn(
+            "logical_target_is_safe(axis, kJ5PostHomeStandbyMilliDegrees)",
+            self.source,
+        )
+        self.assertIn("j5_sensor_failed_to_clear", self.source)
+        self.assertIn("j5_sensor_retriggered_during_standby", self.source)
+        self.assertIn("j5_sensor_stuck_active_30deg", self.source)
+        start_home = self.source[self.source.index("void start_home(") :]
+        self.assertLess(start_home.index("homed[axis] = false"), start_home.index("motion.running = true"))
 
 
 if __name__ == "__main__":

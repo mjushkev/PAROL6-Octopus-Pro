@@ -345,6 +345,11 @@ Use these reviewed Python API values as the starting software envelope, then red
 | J5 | -90 deg | +90 deg | 0 deg |
 | J6 | 0 deg | +360 deg | +180 deg |
 
+Owner-selected completed-robot calibration overrides the reviewed J5 baseline:
+J5 is limited to -254.25 through 0 degrees and moves to -130 degrees after its
+two-pass home latch. Firmware 0.9.1 enforces that post-home target and does not
+report J5 homed until the standby move finishes successfully.
+
 J6 is not to be treated as electrically or mechanically continuous. The internal cable path and tool wiring remain limited even if a URDF calls the joint continuous. J1's mechanical rotation blocker is mandatory.
 
 ### 6.3 Coordinate and calibration rules

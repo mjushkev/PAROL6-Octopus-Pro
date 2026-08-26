@@ -53,6 +53,8 @@ constexpr std::int32_t kJ1HardMinimumMilliDegrees = -230000;
 constexpr std::int32_t kJ1HardMaximumMilliDegrees = 35000;
 constexpr std::int32_t kJ6HardMinimumMilliDegrees = -180000;
 constexpr std::int32_t kJ6HardMaximumMilliDegrees = 180000;
+constexpr std::size_t kJ5Axis = 4U;
+constexpr std::int32_t kJ5PostHomeStandbyMilliDegrees = -130000;
 constexpr std::uint32_t kMinimumCoordinatedDurationMs = 500U;
 constexpr std::uint32_t kMaximumCoordinatedDurationMs = 60000U;
 // Initial owner-selected production commissioning ceiling.  These values are
@@ -114,6 +116,7 @@ enum class HomePhase : std::uint8_t {
   backoff_margin,
   slow_seek,
   final_clear,
+  post_home_standby,
 };
 
 struct MotionProfile {
@@ -141,6 +144,7 @@ struct MotionTask {
   std::uint32_t started_ms = 0U;
   std::uint32_t hold_deadline_ms = 0U;
   bool soft_limit_target = false;
+  bool home_sensor_cleared = false;
 };
 
 struct CoordinatedTask {
@@ -571,6 +575,7 @@ void print_ready() {
                "coordinated_move=all_joints_shared_trapezoid "
                "coordinated_speed_cap_percent=10 coordinated_hold=host_supervised "
                "home_sequence=J2,J3,J4,J6,J5 "
+               "j5_post_home_standby_mdeg=-130000 "
                "mechanical_home_map=J2:PG10,J3:PG12,J5:PG9 "
                "home_limits=J2:J3:auto_zero_boundary "
                "j4_home=positive_clear_then_zero_min "
@@ -1085,6 +1090,14 @@ void start_home_phase(HomePhase phase) {
       prepare_logical_move(axis, kHomeInitialReleaseMilliDegrees,
                            kProfiles[0], 0.35F);
       break;
+    case HomePhase::post_home_standby: {
+      print_home_phase(axis, "POST_HOME_STANDBY_MINUS_130");
+      motion.home_sensor_cleared = !home_sensor_active(axis);
+      const std::int32_t delta =
+          kJ5PostHomeStandbyMilliDegrees - joint_position_millidegrees(axis);
+      prepare_logical_move(axis, delta, kProfiles[0]);
+      break;
+    }
     case HomePhase::none:
       break;
   }
@@ -1092,6 +1105,10 @@ void start_home_phase(HomePhase phase) {
 
 void start_home(std::size_t axis) {
   sample_sensors();
+  // A new homing attempt invalidates the previous reference until every
+  // required phase, including a configured post-home move, completes.
+  homed[axis] = false;
+  manual_home_temporary[axis] = false;
   motion.running = true;
   motion.kind = MotionKind::home;
   motion.axis = axis;
@@ -1222,12 +1239,21 @@ void service_home() {
           return;
         }
         stepper.setCurrentPosition(0L);
-        homed[axis] = true;
         manual_home_temporary[axis] = false;
         if (!apply_automatic_home_boundary(axis)) {
           homed[axis] = false;
           return;
         }
+        if (axis == kJ5Axis) {
+          if (!logical_target_is_safe(axis, kJ5PostHomeStandbyMilliDegrees)) {
+            homed[axis] = false;
+            end_motion("j5_standby_outside_soft_limits");
+            return;
+          }
+          start_home_phase(HomePhase::post_home_standby);
+          return;
+        }
+        homed[axis] = true;
         end_motion("complete");
         return;
       }
@@ -1243,6 +1269,19 @@ void service_home() {
           return;
         }
         end_motion("complete");
+        return;
+      }
+      break;
+    case HomePhase::post_home_standby:
+      if (!active) motion.home_sensor_cleared = true;
+      else if (motion.home_sensor_cleared) {
+        homed[axis] = false;
+        end_motion("j5_sensor_retriggered_during_standby");
+        return;
+      } else if (joint_position_millidegrees(axis) <=
+                 -kHomeInitialReleaseMilliDegrees) {
+        homed[axis] = false;
+        end_motion("j5_sensor_stuck_active_30deg");
         return;
       }
       break;
@@ -1270,6 +1309,15 @@ void service_home() {
       break;
     case HomePhase::final_clear:
       end_motion("j4_sensor_stuck_active_30deg");
+      break;
+    case HomePhase::post_home_standby:
+      if (!motion.home_sensor_cleared) {
+        homed[axis] = false;
+        end_motion("j5_sensor_failed_to_clear");
+        break;
+      }
+      homed[axis] = true;
+      end_motion("complete");
       break;
     case HomePhase::none:
       end_motion("home_state_fault");

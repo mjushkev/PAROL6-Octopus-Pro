@@ -44,10 +44,19 @@
       "hardware_outputs_enabled": true,
       "motion_capable": true,
       "post_flash_usb_verified": false
+    },
+    {
+      "name": "octopus_h723_motion_rc_0.9.1",
+      "path": "dist/octopus-h723-motion-rc-0.9.1/firmware.bin",
+      "sha256": "5FAE34E6BA1C6BFC4D8645B8EDBA8F32AB63A3F588B42B21814F9D33EBB16300",
+      "hardware_outputs_enabled": true,
+      "motion_capable": true,
+      "post_flash_usb_verified": false,
+      "j5_post_home_standby_deg": -130.0
     }
   ],
   "blockers": [
-    "Motion RC 0.9.0 synchronized motion has not yet passed hardware-in-loop verification",
+    "Motion RC 0.9.1 synchronized motion and J5 post-home standby have not yet passed hardware-in-loop verification",
     "J1 automatic homing remains unavailable until its sensor is repaired and verified",
     "Formal loaded thermal, repeatability, and endurance evidence remains incomplete",
     "Offline Windows installer has not been built"

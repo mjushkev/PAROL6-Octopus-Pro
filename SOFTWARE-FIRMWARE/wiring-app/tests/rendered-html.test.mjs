@@ -13,7 +13,7 @@ test("renders the calibrated PAROL6 operator console", async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Direct joint control/i);
-  assert.match(html, /PAROL6 OPERATOR · MOTION RC 0\.9\.0/i);
+  assert.match(html, /PAROL6 OPERATOR · MOTION RC 0\.9\.1/i);
   assert.match(html, /Calibrated limits · open-loop step tracking · direct USB/i);
   assert.match(html, /Connect USB/i);
   assert.match(html, /Enable motion/i);
