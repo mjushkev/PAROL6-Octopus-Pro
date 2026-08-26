@@ -6,24 +6,30 @@ separate from the pinned official PAROL6 checkout in the parent directory.
 
 ## Current milestone
 
-The installed H723 image is the USB-only, output-disabled
-`0.2.0-safe-core`, verified on COM4. A separate `0.3.0-service-core` image adds
-the canonical binary protocol and dual-sector internal-flash persistence, but
-has only been built and tested offline; it has not been flashed. Neither image
-can generate a STEP pulse, energize a driver, drive the motor contactor, or
-output a gripper PWM signal.
+The owner reports all six joints functional and calibrated on the installed
+`0.8.12-calibration-rc`. The authoritative, machine-readable result is
+[`config/robot.mattj.calibrated.json`](config/robot.mattj.calibrated.json): it
+records every pulse conversion, direction, home behavior, and joint limit.
+J1 defaults to a temporary manual zero until its sensor is repaired; automatic
+J1 sensor homing remains available as an operator-selected mode.
 
-All real hardware outputs remain blocked by the hardware-verification gates in
-[`docs/HARDWARE_VERIFICATION.md`](docs/HARDWARE_VERIFICATION.md). This project
-is experimental and is not a certified safety system. Read the parent
-repository's `SAFETY_WARNING_AND_DISCLAIMER.md` before physical work.
+`0.9.0-motion-rc` is the next image. It preserves the calibration firmware's
+home state machine and flash records, and adds a token-bound, synchronized
+six-joint move with a 10% initial speed/acceleration ceiling, firmware soft
+limits, switch guards, host timeout, and supervised pose hold. It builds and
+passes the offline verifier but has not yet been flashed or hardware-tested.
+The rollback image remains `0.8.12-calibration-rc`.
 
-The owner now reports the robot wired except for the power button. That report
-is not inspection evidence, so the hardware gates remain closed. Initial
-development uses direct PC-to-Octopus USB with the ESP deferred. Follow the
-[`USB logic bring-up`](docs/USB_LOGIC_BRINGUP.md) and
-[`wiring tutorial`](docs/WIRING_GUIDE.md); both stop before actuator power or
-motion.
+The hosted Web Serial app now opens on a simple operator console with per-joint
+home/jog controls, a persistent Manual/Auto J1 home switch, dry-run pose checks,
+synchronized pose movement, and a software motor stop. Calibration/service and
+wiring views remain available. Direct USB is still the only control transport;
+the ESP is deferred.
+
+This is experimental machinery, not a certified safety system. Software stop
+and firmware limits do not replace the physical E-stop, guarded workspace, or
+safe mechanical support. Read the parent repository's
+`SAFETY_WARNING_AND_DISCLAIMER.md` before physical work.
 
 ## Run the simulation checks
 

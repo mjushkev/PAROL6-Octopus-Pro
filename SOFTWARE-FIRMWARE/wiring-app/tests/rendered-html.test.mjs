@@ -8,32 +8,27 @@ async function render() {
   return worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html" } }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
 }
 
-test("renders the PAROL6 joint homing and limit test workbench", async () => {
+test("renders the calibrated PAROL6 operator console", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /Home and test every joint/i);
-  assert.match(html, /PAROL6 JOINT TEST · 0\.8\.12/i);
-  assert.match(html, /Home → test 10° short of maximum → test maximum/i);
+  assert.match(html, /Direct joint control/i);
+  assert.match(html, /PAROL6 OPERATOR · MOTION RC 0\.9\.0/i);
+  assert.match(html, /Calibrated limits · open-loop step tracking · direct USB/i);
   assert.match(html, /Connect USB/i);
-  assert.match(html, /Enable setup motion/i);
-  assert.match(html, /Test raw −/i);
-  assert.match(html, /Test raw \+/i);
-  assert.match(html, /moves exactly 2° at half GENTLE speed/i);
-  assert.match(html, /Which raw direction should mean joint \+/i);
-  assert.match(html, /Which raw direction moves toward home/i);
-  assert.match(html, /Sensor value when triggered/i);
-  assert.match(html, /Save joint setup/i);
-  assert.match(html, /Home J1/i);
-  assert.match(html, /Set current J1 position as 0°/i);
-  assert.match(html, /J1 TEMPORARY FALLBACK/i);
-  assert.match(html, /Set min here/i);
-  assert.match(html, /Set max here/i);
-  assert.match(html, /Export JSON/i);
-  assert.match(html, /Max −10°/i);
-  assert.match(html, /Max limit/i);
+  assert.match(html, /Enable motion/i);
+  assert.match(html, /J1 HOME SOURCE/i);
+  assert.match(html, /Manual zero/i);
+  assert.match(html, /Auto sensor/i);
+  assert.match(html, /Home all/i);
+  assert.match(html, /Hold −/i);
+  assert.match(html, /Hold \+/i);
+  assert.match(html, /SYNCHRONIZED POSE/i);
+  assert.match(html, /Dry run/i);
+  assert.match(html, /10% coordinated ceiling/i);
+  assert.match(html, /-230/i);
+  assert.match(html, /232\.694/i);
   assert.match(html, /MOTOR STOP/i);
-  assert.match(html, /Home J2–J6 sequence/i);
   assert.match(html, /Controller log/i);
   assert.doesNotMatch(html, /MOTION INTERLOCKS|Arm supported against gravity|Arm hold-to-jog/i);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);

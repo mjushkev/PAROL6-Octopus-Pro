@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import CommissioningPanel from "./commissioning-panel";
+import OperatorPanel from "./operator-panel";
 
 type PortStatus = "mapped" | "verify" | "blocked" | "unused" | "service";
 
@@ -233,12 +234,16 @@ const statusLabel: Record<PortStatus, string> = {
 };
 
 export default function Home() {
-  const [view, setView] = useState<"test" | "wiring">("test");
+  const [view, setView] = useState<"operate" | "test" | "wiring">("operate");
   const [selectedId, setSelectedId] = useState("usb");
   const selected = ports.find((port) => port.id === selectedId) ?? ports[0];
 
+  if (view === "operate") {
+    return <OperatorPanel onShowSetup={() => setView("test")} onShowWiring={() => setView("wiring")} />;
+  }
+
   if (view === "test") {
-    return <CommissioningPanel onShowWiring={() => setView("wiring")} />;
+    return <CommissioningPanel onShowWiring={() => setView("wiring")} onShowOperator={() => setView("operate")} />;
   }
 
   return (
@@ -246,7 +251,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand"><span className="brand-dot" />PAROL6 <b>OCTOPUS WIRING MAP</b></div>
         <div className="board-id">OCTOPUS PRO V1.1 · STM32H723 · USB PRIMARY</div>
-        <button className="map-test-button" onClick={() => setView("test")}>Test console</button>
+        <button className="map-test-button" onClick={() => setView("operate")}>Operator</button>
       </header>
 
       <div className="notice">
@@ -259,6 +264,7 @@ export default function Home() {
           <div className="board-scroll">
             <div className="board-canvas">
               {/* Official BIGTREETECH V1.1 pin image; hotspot positions are percentages of this image. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/octopus-pro-v1-1-pin.jpg" alt="Official BIGTREETECH Octopus Pro V1.1 top-down pin diagram" draggable={false} />
               {ports.map((port) => (
                 <button

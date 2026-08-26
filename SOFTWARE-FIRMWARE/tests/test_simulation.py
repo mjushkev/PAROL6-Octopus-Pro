@@ -38,8 +38,8 @@ class SimulationTests(unittest.TestCase):
         client.send(MessageType.TRAJECTORY_BEGIN, (55).to_bytes(8, "little"))
         points = {
             "points": [
-                {"index": 0, "duration_ms": 100, "target_steps": [10250, -31990, 57915, 10, 10, 32010]},
-                {"index": 1, "duration_ms": 100, "target_steps": [10260, -31980, 57925, 20, 20, 32020]},
+                {"index": 0, "duration_ms": 100, "target_steps": [10, 10, -10, 10, -10, 10]},
+                {"index": 1, "duration_ms": 100, "target_steps": [20, 20, -20, 20, -20, 20]},
             ]
         }
         client.send(MessageType.TRAJECTORY_POINTS, json.dumps(points).encode())
@@ -60,7 +60,7 @@ class SimulationTests(unittest.TestCase):
         client.send(MessageType.TRAJECTORY_BEGIN, (9).to_bytes(8, "little"))
         points = {
             "points": [
-                {"index": 0, "duration_ms": 50, "target_steps": [10241, -31999, 57906, 1, 1, 32001]}
+                {"index": 0, "duration_ms": 50, "target_steps": [1, 1, -1, 1, -1, 1]}
             ]
         }
         client.send(MessageType.TRAJECTORY_POINTS, json.dumps(points).encode())

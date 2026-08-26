@@ -41,7 +41,7 @@ class FakeMCU:
         self._windows: dict[int, ReplayWindow] = {}
         self.status = ControllerStatus(controller_state=self.safety.state)
         self.executed_trajectory_ids: set[int] = set()
-        self.current_steps = (10_240, -32_000, 57_905, 0, 0, 32_000)
+        self.current_steps = (0, 0, 0, 0, 0, 0)
         self.trajectory = TrajectoryBuffer()
 
     def connect(self, session_id: int) -> None:
