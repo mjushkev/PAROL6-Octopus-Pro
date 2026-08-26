@@ -12,9 +12,9 @@ test("renders the calibrated PAROL6 operator console", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /Direct joint control/i);
-  assert.match(html, /PAROL6 OPERATOR · MOTION RC 0\.9\.1/i);
-  assert.match(html, /Calibrated limits · open-loop step tracking · direct USB/i);
+  assert.match(html, /Robot Commander/i);
+  assert.match(html, /PAROL6 COMMANDER · MOTION RC 0\.9\.1/i);
+  assert.match(html, /Manual control · synchronized poses · offline programs · direct USB/i);
   assert.match(html, /Connect USB/i);
   assert.match(html, /Enable motion/i);
   assert.match(html, /J1 HOME SOURCE/i);
@@ -25,6 +25,9 @@ test("renders the calibrated PAROL6 operator console", async () => {
   assert.match(html, /Hold \+/i);
   assert.match(html, /SYNCHRONIZED POSE/i);
   assert.match(html, /Dry run/i);
+  assert.match(html, /STAGE 3 · PROGRAMS/i);
+  assert.match(html, /Capture current pose/i);
+  assert.match(html, /never resumes automatically/i);
   assert.match(html, /10% coordinated ceiling/i);
   assert.match(html, /-230/i);
   assert.match(html, /232\.694/i);

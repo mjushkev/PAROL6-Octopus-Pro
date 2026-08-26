@@ -11,8 +11,8 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const imageUrl = `${protocol}://${host}/og-motion-rc.png`;
-  const title = "PAROL6 Motion Control";
-  const description = "Calibrated direct-USB control for homing, jogging, synchronized pose moves, motor stop, service setup, and wiring reference.";
+  const title = "PAROL6 Robot Commander";
+  const description = "Calibrated direct-USB control for homing, jogging, synchronized poses, local robot programs, motor stop, service setup, and wiring reference.";
 
   return {
     title,

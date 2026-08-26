@@ -4,6 +4,15 @@
 
 ### Added
 
+- Stage 3 Robot Commander foundation: a direct-USB, local multi-waypoint
+  program editor with live-pose capture, all-six-joint target editing,
+  per-waypoint 1–10% speed and 0–60 second wait, repeat/reorder, JSON
+  import/export, complete-program dry-run validation, continuous supervised
+  holding torque between moves, and fail-closed STOP/disconnect/error handling.
+- Windows backend program planning and deterministic `0.9.1-motion-rc` USB
+  parsing/transport, covered by the expanded 83-test offline suite.
+- Owner-reported functional validation of installed `0.9.1-motion-rc`, including
+  calibrated joint motion, synchronized moves, homing and J5's −130° standby.
 - `0.8.2-calibration-rc` adds a J1-only, non-motion temporary manual-zero
   command for operation while the J1 home sensor is unavailable. It disables
   every driver, assigns the current J1 step position to 0°, clears stale J1

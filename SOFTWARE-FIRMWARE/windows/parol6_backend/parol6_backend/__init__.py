@@ -21,6 +21,21 @@ from .calibration import (
     load_default_calibration,
 )
 from .operator import OperatorError, OperatorSession
+from .programs import (
+    MotionProgram,
+    PlannedProgram,
+    PlannedProgramStep,
+    ProgramError,
+    ProgramPlanner,
+    ProgramWaypoint,
+)
+from .direct_usb import (
+    DirectUsbError,
+    DirectUsbTransport,
+    MotionRcLineParser,
+    MotionRcSnapshot,
+    SUPPORTED_FIRMWARE,
+)
 
 __all__ = [
     "ControllerStatus",
@@ -48,4 +63,15 @@ __all__ = [
     "load_default_calibration",
     "OperatorError",
     "OperatorSession",
+    "MotionProgram",
+    "PlannedProgram",
+    "PlannedProgramStep",
+    "ProgramError",
+    "ProgramPlanner",
+    "ProgramWaypoint",
+    "DirectUsbError",
+    "DirectUsbTransport",
+    "MotionRcLineParser",
+    "MotionRcSnapshot",
+    "SUPPORTED_FIRMWARE",
 ]
