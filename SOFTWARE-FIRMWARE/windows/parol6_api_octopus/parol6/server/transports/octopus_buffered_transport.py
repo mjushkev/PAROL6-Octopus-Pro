@@ -13,7 +13,7 @@ import time
 import numpy as np
 import serial
 
-from parol6.hardware_profile import PROFILE
+from parol6.hardware_profile import COMMISSIONING_MAX_DEG_S, PROFILE
 from parol6.protocol.octopus_buffered import (
     ControllerState,
     ErrorCode,
@@ -46,6 +46,14 @@ class OctopusBufferedTransport:
     HEARTBEAT_INTERVAL_S = 0.1
     MOTION_COMMANDS = (
         int(CommandCode.MOVE), int(CommandCode.JOG), int(CommandCode.TELEPORT)
+    )
+    # Match the firmware's validator exactly. Position samples are integer
+    # steps, so a correctly rate-limited trajectory can occasionally advance
+    # one extra step in a 10 ms sample. That quantization must not inflate the
+    # transmitted max-speed field beyond the firmware limit.
+    SPEED_LIMITS_STEPS_S = tuple(
+        int(COMMISSIONING_MAX_DEG_S[axis] * PROFILE.pulses_per_degree[axis] + 1.0)
+        for axis in range(6)
     )
 
     def __init__(self, port: str | None = None, baudrate: int = 2_000_000, timeout: float = 0) -> None:
@@ -131,6 +139,44 @@ class OctopusBufferedTransport:
                     if response.profile_crc32c != self._profile_crc:
                         raise ProtocolError("firmware owner-profile checksum does not match Commander")
                     self._queue_capacity = response.queue_capacity
+
+                    # A firmware fault deliberately survives a USB/host reconnect.
+                    # Start every checksum-gated session by clearing the firmware
+                    # queue and fault latch, then require proof that it is idle.
+                    # CLEAR never enables a motor or starts motion.
+                    clear_packet = self._next_packet(MessageType.CLEAR)
+                    self.serial.write(clear_packet.encode())
+                    clear_deadline = time.perf_counter() + self.HANDSHAKE_TIMEOUT_S
+                    while time.perf_counter() < clear_deadline:
+                        clear_chunk = self.serial.read(4096)
+                        if not clear_chunk:
+                            continue
+                        for clear_response in self._decoder.feed(clear_chunk):
+                            if clear_response.message_type is MessageType.ERROR:
+                                rejected, code, detail = decode_error(clear_response.payload)
+                                if rejected == clear_packet.sequence:
+                                    raise ProtocolError(
+                                        f"firmware rejected safe session clear: {code.name} ({detail})"
+                                    )
+                                continue
+                            if clear_response.message_type is not MessageType.ACK:
+                                continue
+                            acknowledged, depth, capacity, state = decode_ack(clear_response.payload)
+                            if acknowledged != clear_packet.sequence:
+                                continue
+                            if depth != 0 or state != ControllerState.IDLE:
+                                raise ProtocolError(
+                                    "firmware did not enter disabled idle state after session clear"
+                                )
+                            self._queue_depth = depth
+                            self._queue_capacity = capacity
+                            break
+                        else:
+                            continue
+                        break
+                    else:
+                        raise ProtocolError("P6B1 safe session clear timed out")
+
                     self._connected = True
                     self._last_tx_monotonic = time.monotonic()
                     logger.info(
@@ -247,19 +293,7 @@ class OctopusBufferedTransport:
             previous = self._pending[0].positions_steps
         timed_points: list[Setpoint] = []
         for point in self._pending:
-            derived = tuple(
-                (abs(point.positions_steps[axis] - previous[axis]) * 1_000_000 + self.PERIOD_US - 1)
-                // self.PERIOD_US
-                for axis in range(6)
-            )
-            timed_points.append(
-                Setpoint(
-                    point.positions_steps,
-                    tuple(max(point.speeds_steps_s[axis], derived[axis]) for axis in range(6)),  # type: ignore[arg-type]
-                    point.io_bits,
-                    point.command,
-                )
-            )
+            timed_points.append(self._bounded_timed_setpoint(point, previous))
             previous = point.positions_steps
         points = tuple(timed_points)
         self._last_sent_positions = previous
@@ -273,6 +307,38 @@ class OctopusBufferedTransport:
                 return False
             self._started = True
         return True
+
+    def _bounded_timed_setpoint(
+        self,
+        point: Setpoint,
+        previous: tuple[int, int, int, int, int, int],
+    ) -> Setpoint:
+        """Add timing-derived rates without violating owner speed limits.
+
+        The derived rate is useful when the planner's reported rate rounds
+        down, but it is only a max-speed hint. Clamping that hint preserves the
+        calibrated motion cap and prevents an otherwise valid one-step jog
+        from being rejected as ``INVALID_PAYLOAD`` by the firmware.
+        """
+        derived = tuple(
+            (
+                abs(point.positions_steps[axis] - previous[axis]) * 1_000_000
+                + self.PERIOD_US
+                - 1
+            )
+            // self.PERIOD_US
+            for axis in range(6)
+        )
+        speeds = tuple(
+            min(
+                self.SPEED_LIMITS_STEPS_S[axis],
+                max(point.speeds_steps_s[axis], derived[axis]),
+            )
+            for axis in range(6)
+        )
+        return Setpoint(  # type: ignore[arg-type]
+            point.positions_steps, speeds, point.io_bits, point.command
+        )
 
     def priority_stop(self) -> bool:
         """Drop host and firmware queues and request immediate motor stop."""
@@ -330,7 +396,14 @@ class OctopusBufferedTransport:
         for index, value in enumerate(status.speeds_steps_s):
             self._put_i24(out, 18 + index * 3, value)
         out[36] = 0xFC if status.state & ControllerState.HOMED else 0
-        out[37] = status.sensor_bits & 0xFF
+        # The stock 52-byte frame uses this byte for [IN1, IN2, OUT1, OUT2,
+        # ESTOP, reserved...], not for the six joint home sensors. Copying
+        # sensor_bits here made J5 (axis index 4) masquerade as the physical
+        # E-stop. This owner's E-stop removes controller power, so a live P6B1
+        # session is the positive evidence that E-stop is released. Joint
+        # sensors remain available in the native P6B1 Status object and are
+        # never aliased into the Commander E-stop channel.
+        out[37] = 0x08
         out[38] = 0xFF if status.faults & (Fault.WATCHDOG | Fault.ESTOP) else 0
         out[39] = 0xFF if status.faults else 0
         out[40] = 0

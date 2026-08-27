@@ -22,7 +22,7 @@ from scipy.spatial.transform import Rotation
 PROFILE_SCHEMA = "parol6.production-calibration.v1"
 EXPECTED_ROBOT_ID = "PAROL6-MATTJ-001"
 EXPECTED_BOARD = "BTT_OCTOPUS_PRO_V1_1_H723ZE"
-BUNDLED_PROFILE_SHA256 = "d872ec0f0e6031d0b5b8846cf1c088a4975ab39d121899018e25f75ecce6f48d"
+BUNDLED_PROFILE_SHA256 = "5eb94dc1c1e3e0693488b989b6d1ac021f8c9ed31dd3710330f9879b0577a584"
 
 # q_urdf = MODEL_SIGN * q_owner + MODEL_ZERO_OFFSET_DEG
 # J1 assumes the owner-selected manual zero is the standard 90-degree standby.
@@ -35,11 +35,10 @@ MODEL_ZERO_OFFSET_DEG = np.array(
 )
 MODEL_MAPPING_STATUS = "derived_pending_physical_pose_validation"
 
-# Firmware 0.9.1's proven coordinated-motion ceiling.  These are intentionally
-# not the eventual mechanical limits; they keep first Commander validation at
-# the already-tested 10% commissioning rate.
-COMMISSIONING_MAX_DEG_S = np.array([4.0, 1.0, 4.5, 4.5, 4.5, 4.5])
-COMMISSIONING_MAX_DEG_S2 = np.array([8.0, 2.5, 12.0, 12.0, 12.0, 12.0])
+# Owner-selected 50% commissioning stage. J1/J2 remain capped at their
+# separately proven Servo42C pulse rates; J3-J6 use 50% of the reviewed rates.
+COMMISSIONING_MAX_DEG_S = np.array([4.0, 1.0, 22.5, 22.5, 22.5, 22.5])
+COMMISSIONING_MAX_DEG_S2 = np.array([8.0, 2.5, 60.0, 60.0, 60.0, 60.0])
 
 
 @dataclass(frozen=True)

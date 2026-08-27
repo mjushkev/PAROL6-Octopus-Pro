@@ -38,7 +38,7 @@ constexpr std::size_t kLineCapacity = 127U;
 constexpr std::uint8_t kDebounceSamples = 8U;
 constexpr std::uint32_t kHostMotionTimeoutMs = 2000U;
 constexpr std::uint32_t kP6b1WatchdogMs = 250U;
-constexpr std::uint32_t kP6b1ProfileCrc32c = 0xAA14C22FU;
+constexpr std::uint32_t kP6b1ProfileCrc32c = 0xB39A8973U;
 constexpr std::size_t kP6b1QueueCapacity = 512U;
 constexpr std::uint32_t kP6b1StatusPeriodMs = 20U;
 constexpr std::uint32_t kMotorHoldTimeoutMs = 2000U;
@@ -49,7 +49,7 @@ constexpr std::int32_t kDirectionDiscoveryJogMilliDegrees = 2000;
 constexpr std::int32_t kMaximumHoldTravelMilliDegrees = 45000;
 constexpr std::int32_t kMinimumHoldSpeedMilliDegreesPerSecond = 3000;
 constexpr std::int32_t kMaximumHoldSpeedMilliDegreesPerSecond = 45000;
-constexpr std::int32_t kHomeSeekMilliDegrees = 30000;
+constexpr std::int32_t kHomeSeekMilliDegrees = 90000;
 constexpr std::int32_t kHomeInitialReleaseMilliDegrees = 30000;
 constexpr std::int32_t kHomeBackoffMilliDegrees = 5000;
 constexpr std::int32_t kHomeMarginMilliDegrees = 500;
@@ -58,17 +58,17 @@ constexpr std::int32_t kJ1HardMinimumMilliDegrees = -230000;
 constexpr std::int32_t kJ1HardMaximumMilliDegrees = 35000;
 constexpr std::int32_t kJ6HardMinimumMilliDegrees = -180000;
 constexpr std::int32_t kJ6HardMaximumMilliDegrees = 180000;
+constexpr bool kJ6SensorHomeEnabled = false;
 constexpr std::size_t kJ5Axis = 4U;
 constexpr std::int32_t kJ5PostHomeStandbyMilliDegrees = -130000;
 constexpr std::uint32_t kMinimumCoordinatedDurationMs = 500U;
 constexpr std::uint32_t kMaximumCoordinatedDurationMs = 60000U;
-// Initial owner-selected production commissioning ceiling.  These values are
-// deliberately 10% of the reviewed joint ceilings and may only be raised
-// after loaded, thermally monitored validation.
+// Owner-selected 50% commissioning stage. J1/J2 remain at their separately
+// validated Servo42C pulse ceilings; J3-J6 use 50% of the reviewed ceilings.
 constexpr std::array<float, 6> kCoordinatedMaximumDegreesPerSecond = {
-    4.0F, 1.0F, 4.5F, 4.5F, 4.5F, 4.5F};
+    4.0F, 1.0F, 22.5F, 22.5F, 22.5F, 22.5F};
 constexpr std::array<float, 6> kCoordinatedMaximumAccelerationDegreesPerSecond2 = {
-    8.0F, 2.5F, 12.0F, 12.0F, 12.0F, 12.0F};
+    8.0F, 2.5F, 60.0F, 60.0F, 60.0F, 60.0F};
 
 constexpr std::array<std::uint32_t, 6> kStepPins = {
     PF13, PG0, PF11, PG4, PF9, PC13};
@@ -375,6 +375,24 @@ void disable_all() {
   for (std::size_t axis = 0U; axis < 6U; ++axis) disable_axis(axis);
 }
 
+void configure_servo_interface(std::size_t axis, bool active_low) {
+  servo_enable_active_low[axis] = active_low;
+  servo_gate_open[axis] = true;
+  pinMode(kStepPins[axis], OUTPUT);
+  pinMode(kDirectionPins[axis], OUTPUT);
+  digitalWrite(kStepPins[axis], HIGH);
+  digitalWrite(kDirectionPins[axis], LOW);
+  disable_axis(axis);
+}
+
+void configure_owner_servo_interfaces() {
+  // J1/J2 were physically validated with the supplied 3.3 V push-pull
+  // adapters and active-low enable. Keep their pins tri-stated through boot;
+  // only the exact owner-profile P6B1 session clear may open these gates.
+  configure_servo_interface(0U, true);
+  configure_servo_interface(1U, true);
+}
+
 void sample_sensors();
 void end_motion(const char* result);
 void error(const char* code);
@@ -608,6 +626,7 @@ void print_ready() {
                "home_limits=J2:J3:auto_zero_boundary "
                "j4_home=positive_clear_then_zero_min "
                "home_style=standard_two_pass_adapted "
+               "home_seek_max_mdeg=90000 "
                "home_initial_release_max_mdeg=30000 "
                "j1_home=sensor_or_manual_temporary "
                "j1_limits_mdeg=-230000:35000 "
@@ -1335,7 +1354,7 @@ void service_home() {
       end_motion("sensor_stuck_active_30deg");
       break;
     case HomePhase::fast_seek:
-      end_motion("sensor_not_found_30deg");
+      end_motion("sensor_not_found_90deg");
       break;
     case HomePhase::latch_backoff:
       end_motion("sensor_failed_to_clear");
@@ -1807,6 +1826,16 @@ void p6_start_next_home_axis() {
       ++p6_home_index;
       continue;
     }
+    if (axis == 5U && !kJ6SensorHomeEnabled) {
+      // Temporary no-end-effector configuration: retain J6's calibrated
+      // direction and fixed +/-180 degree containment, but define the current
+      // startup position as zero without moving to its sensor.
+      steppers[axis]->setCurrentPosition(0L);
+      homed[axis] = true;
+      manual_home_temporary[axis] = true;
+      ++p6_home_index;
+      continue;
+    }
     if (!home_configured[axis] || !watchdog_ready || !preflight_axis(axis)) {
       p6_latch_fault(parol6::p6b1::limit);
       return;
@@ -1947,6 +1976,11 @@ void p6_handle_packet(const parol6::p6b1::PacketView& packet) {
     p6_motion_running = false;
     p6_finish_requested = false;
     p6_home_sequence_active = false;
+    abort_motion("p6b1_session_clear");
+    release_motor_hold("p6b1_session_clear");
+    release_coordinated_hold("p6b1_session_clear");
+    disable_all();
+    configure_owner_servo_interfaces();
     p6_state = parol6::p6b1::idle;
     p6_send_ack(packet.sequence);
     return;
@@ -2387,13 +2421,7 @@ void handle_line(char* command) {
       error("servo_gate_rejected");
       return;
     }
-    servo_enable_active_low[axis] = std::strcmp(polarity, "ACTIVE_LOW") == 0;
-    servo_gate_open[axis] = true;
-    pinMode(kStepPins[axis], OUTPUT);
-    pinMode(kDirectionPins[axis], OUTPUT);
-    digitalWrite(kStepPins[axis], HIGH);
-    digitalWrite(kDirectionPins[axis], LOW);
-    disable_axis(axis);
+    configure_servo_interface(axis, std::strcmp(polarity, "ACTIVE_LOW") == 0);
     rotate_token();
     Serial.print("PAROL6_SERVO_CONFIGURED joint=J");
     Serial.print(axis + 1U);

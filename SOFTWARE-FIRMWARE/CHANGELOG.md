@@ -4,6 +4,27 @@
 
 ### Added
 
+- Commander jog/step reliability repair: P6B1 timing-derived rates are now
+  clamped to the exact calibrated firmware limits, so integer step sampling
+  cannot turn a valid step into `INVALID_PAYLOAD`, release motor hold, and
+  force a USB reconnect. Commander also clears stale browser press/timer state
+  whenever motion becomes unavailable, making the next click a fresh step.
+- The TCP coordinate pointer now follows the selected reference frame (world
+  axes for WRF translation; tool axes for TRF translation and rotation) and
+  refreshes orientation on wrist-only motion even when TCP XYZ is unchanged.
+
+- Commander firmware `1.0.0-commander-rc5` opens the owner-verified J1/J2
+  active-low Servo42C interfaces only after the checksum-gated P6B1 session
+  clear. The clear path now aborts all motion, releases holds, disables every
+  driver, empties the queue, and returns an idle acknowledgement before the
+  host reports a connection. This restores J2 preflight and grouped homing
+  after every controller reboot without weakening the boot-local output gate.
+  While J6 has no end effector, grouped Home skips its sensor move, assigns its
+  current startup position as a temporary 0 degrees, and retains the calibrated
+  direction plus fixed -180 to +180 degree containment for manual operation.
+  The owner-selected motion stage is raised to 50% for J3-J6; J1 and J2 retain
+  their separately validated lower Servo42C pulse and acceleration ceilings.
+
 - Per-component 3D model appearance controls in Commander. Combined URDF link
   meshes are split into their disconnected physical shells at runtime, so the
   operator can click covers, housings, shafts, and other separate components

@@ -7,7 +7,7 @@ $project = Join-Path $repoRoot "firmware\octopus_h723_commander"
 $python = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
 $pioPackages = Join-Path (Split-Path -Parent $repoRoot) "tmp\pio-env\Lib\site-packages"
 $elf = Join-Path $project ".pio\build\octopus_h723_commander\firmware.elf"
-$release = Join-Path $repoRoot "dist\commander-1.0.0-rc1"
+$release = Join-Path $repoRoot "dist\commander-1.0.0-rc5"
 
 if (-not (Test-Path -LiteralPath $python)) {
     throw "The pinned Python runtime is missing: $python"

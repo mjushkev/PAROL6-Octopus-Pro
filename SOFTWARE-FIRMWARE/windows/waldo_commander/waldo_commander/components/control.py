@@ -695,6 +695,7 @@ class ControlPanel:
         self._gizmo_auto_hidden: bool = (
             False  # True when gizmo hidden due to jog unavailable
         )
+        self._jog_available_last: bool | None = None
 
         self._jog_end_wait_task: asyncio.Task | None = None
 
@@ -742,6 +743,20 @@ class ControlPanel:
         self._cart_axis_lookup = None
         self._last_cart_trans_frame = None
         self.sync_cartesian_button_states()
+        self._sync_gizmo_transform_space()
+
+    def _sync_gizmo_transform_space(self) -> None:
+        """Keep the 3D pointer aligned with the selected jog coordinate frame."""
+        scene = ui_state.urdf_scene
+        if scene is None:
+            return
+        mode = scene.tcp_transform_mode or "translate"
+        space = (
+            "world"
+            if mode == "translate" and self.translation_frame == "WRF"
+            else "local"
+        )
+        scene.set_tcp_transform_space(space)
 
     def apply_jog_inversion(self, axis: str) -> str:
         """Flip an X/Y translation axis string when its invert switch is on.
@@ -777,6 +792,33 @@ class ControlPanel:
             widget.classes(add="is-pressed")
         else:
             widget.classes(remove="is-pressed")
+
+    def _clear_active_jog_inputs(self) -> None:
+        """Clear browser press state after a disconnect or mode transition.
+
+        A mouse-up can be lost while the controller reconnects or the tab loses
+        focus. Keeping that stale state made the next click look like a release
+        instead of a new step and could restart a held jog after reconnection.
+        """
+        if self._joint_click_hold:
+            self._joint_click_hold.cleanup()
+        if self._cart_click_hold:
+            self._cart_click_hold.cleanup()
+        self._jog_pressed_pos[:] = [False] * self._n_joints
+        self._jog_pressed_neg[:] = [False] * self._n_joints
+        for axis in self._cart_pressed_axes:
+            self._cart_pressed_axes[axis] = False
+        for button in (
+            *self._joint_left_btns.values(),
+            *self._joint_right_btns.values(),
+        ):
+            self._apply_pressed_style(button, False)
+        for image in self._cart_axis_imgs.values():
+            self._apply_pressed_style(image, False)
+        if ui_state.joint_jog_timer:
+            ui_state.joint_jog_timer.active = False
+        if ui_state.cart_jog_timer:
+            ui_state.cart_jog_timer.active = False
 
     def _get_first_pressed_joint(self) -> tuple[int, str] | None:
         """Return (index, 'pos'|'neg') for the first pressed joint, else None."""
@@ -1024,6 +1066,9 @@ class ControlPanel:
             )
             and not is_any_program_running()
         )
+        if not jog_possible and self._jog_available_last is not False:
+            self._clear_active_jog_inputs()
+        self._jog_available_last = jog_possible
         if not jog_possible and not self._gizmo_auto_hidden:
             if ui_state.urdf_scene and waldoctl.commander.settings.view.gizmo_visible:
                 ui_state.urdf_scene.set_gizmo_visible(False)
@@ -1350,8 +1395,12 @@ class ControlPanel:
     async def set_joint_pressed(self, j: int, direction: str, is_pressed: bool) -> None:
         """Hybrid click/hold: quick click => single step, press-and-hold => stream until release."""
         if waldoctl.commander.status.editing_mode:
+            if not is_pressed:
+                self._clear_active_jog_inputs()
             return
         if not self._movement_allowed(notify=is_pressed):
+            if not is_pressed:
+                self._clear_active_jog_inputs()
             return
         assert self._joint_click_hold is not None
 
@@ -1460,8 +1509,12 @@ class ControlPanel:
     async def set_axis_pressed(self, axis: str, is_pressed: bool) -> None:
         """Hybrid click/hold for cartesian axes: click => single step, hold => stream."""
         if waldoctl.commander.status.editing_mode:
+            if not is_pressed:
+                self._clear_active_jog_inputs()
             return
         if not self._movement_allowed(notify=is_pressed):
+            if not is_pressed:
+                self._clear_active_jog_inputs()
             return
         assert self._cart_click_hold is not None
 
@@ -1748,6 +1801,7 @@ class ControlPanel:
                 waldoctl.commander.settings.view.gizmo_visible
             )
             ui_state.urdf_scene.set_gizmo_display_mode("TRANSLATE")
+            self._sync_gizmo_transform_space()
             # Fixed axis-to-slot layout for the cartesian jog grid:
             # Y (green) vertical (ud1), X (red) horizontal (lr), Z (blue) vertical (ud2).
             self.set_axis_orientation("Y", "X", "Z")
@@ -1772,6 +1826,7 @@ class ControlPanel:
         ui_state.urdf_scene.set_gizmo_display_mode(internal_mode)
         tcp_mode = "translate" if mode == "Move" else "rotate"
         ui_state.urdf_scene.set_tcp_transform_mode(tcp_mode)
+        self._sync_gizmo_transform_space()
 
     async def on_gizmo_toggle(self, visible: bool) -> None:
         """Toggle gizmo visibility and TCP TransformControls."""
@@ -1781,6 +1836,7 @@ class ControlPanel:
             return
         ui_state.urdf_scene.set_gizmo_visible(bool(visible))
         if visible:
+            self._sync_gizmo_transform_space()
             mode = ui_state.urdf_scene.tcp_transform_mode or "translate"
             ui_state.urdf_scene.enable_tcp_transform_controls(mode)
         else:

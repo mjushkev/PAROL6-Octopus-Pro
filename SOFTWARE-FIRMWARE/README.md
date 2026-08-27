@@ -16,7 +16,7 @@ J1 sensor homing remains available as an operator-selected mode.
 
 `0.9.1-motion-rc` preserves the calibration firmware's
 home state machine and flash records, and adds a token-bound, synchronized
-six-joint move with a 10% initial speed/acceleration ceiling, firmware soft
+six-joint move with a 50% J3-J6 speed/acceleration ceiling, protected J1/J2 Servo42C caps, firmware soft
 limits, switch guards, host timeout, supervised pose hold, and a guarded J5
 post-home move from the 0° latch position to −130° standby. The owner reports
 the installed image, homing, joint motion, synchronized motion and J5 standby

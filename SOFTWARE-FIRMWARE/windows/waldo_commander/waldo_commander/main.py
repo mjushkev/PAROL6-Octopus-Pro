@@ -940,7 +940,7 @@ def build_page_content() -> None:
             and os.getenv("PAROL6_COLLISION_CHECK", "1") == "0"
         ):
             ui.label(
-                "HARDWARE ACCEPTANCE MODE  •  10% SPEED CAP  •  COLLISION CHECKING NOT YET VALIDATED"
+                "HARDWARE ACCEPTANCE MODE  •  50% SPEED CAP (J1/J2 PROTECTED)  •  COLLISION CHECKING NOT YET VALIDATED"
             ).classes(
                 "absolute top-0 left-1/2 -translate-x-1/2 z-50 px-4 py-1 "
                 "rounded-b bg-orange-9 text-white text-xs font-bold shadow-lg"

@@ -19,6 +19,9 @@ using the measured owner profile:
   including separate covers and housings where the URDF mesh preserves them
 - responsive controls that keep all six jog rows and the E-stop visible and
   prevent horizontal scrolling in the Settings panel
+- single-click joint steps that retain motor hold without quantization-triggered
+  firmware reconnects, plus stale press-state cleanup on connection loss
+- a TCP coordinate pointer that tracks WRF/TRF selection and wrist orientation
 - portable Windows builds of TOPP-RA and Pinokin APIs
 
 ## Model appearance
@@ -48,7 +51,7 @@ The launcher now has a hardware acceptance mode:
 It only connects to Commander firmware that proves the P6B1 capabilities and
 the exact owner-profile checksum. Commissioning firmware 0.9.1 and official
 upstream firmware are rejected before any motion command is accepted. The
-firmware keeps an independent 10% speed cap, calibrated joint limits, sensor
+firmware keeps an independent 50% J3-J6 speed cap, lower protected J1/J2 Servo42C caps, calibrated joint limits, sensor
 guards, queue watchdog, CRC and sequence checks, graceful finish-and-hold, and
 priority STOP.
 

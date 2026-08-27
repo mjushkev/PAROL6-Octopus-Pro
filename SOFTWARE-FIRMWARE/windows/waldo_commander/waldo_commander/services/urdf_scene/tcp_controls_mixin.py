@@ -62,6 +62,9 @@ class TCPControlsMixin:
             False  # Guard against concurrent enablement
         )
         self._tcp_transform_mode: str = "translate"  # "translate" or "rotate"
+        # World space makes the translation pointer agree with WRF jogs.
+        # ControlPanel switches this to local for TRF translation and rotation.
+        self._tcp_transform_space: str = "world"
 
         self._tcp_cartesian_move_callback: Callable[[list[float]], None] | None = None
         self._tcp_cartesian_move_start_callback: Callable[[], None] | None = None
@@ -212,7 +215,7 @@ class TCPControlsMixin:
                     ball.enable_transform_controls(
                         mode=self._tcp_transform_mode,
                         size=0.8,
-                        space="local",
+                        space=self._tcp_transform_space,
                     )
                     await asyncio.sleep(0.05)
                     remaining = deadline - loop.time()
@@ -255,13 +258,13 @@ class TCPControlsMixin:
         Args:
             mode: "translate" or "rotate"
         """
-        if not self._tcp_transform_enabled:
-            return
+        normalized = mode.lower()
+        if normalized not in ("translate", "rotate"):
+            raise ValueError("TCP transform mode must be 'translate' or 'rotate'")
+        self._tcp_transform_mode = normalized
 
-        if not self.scene or not self._tcp_ball:
+        if not self._tcp_transform_enabled or not self.scene or not self._tcp_ball:
             return
-
-        self._tcp_transform_mode = mode.lower()
 
         # Sync ball pose from FK first so rotate mode starts from the correct orientation.
         self._update_tcp_ball_position()
@@ -269,6 +272,16 @@ class TCPControlsMixin:
         self._tcp_ball.set_transform_mode(self._tcp_transform_mode)
 
         logger.debug("Changed TCP TransformControls mode to %s", mode)
+
+    def set_tcp_transform_space(self, space: str) -> None:
+        """Set the pointer coordinate frame for current and future controls."""
+        normalized = space.lower()
+        if normalized not in ("local", "world"):
+            raise ValueError("TCP transform space must be 'local' or 'world'")
+        self._tcp_transform_space = normalized
+        if self._tcp_transform_enabled and self.scene and self._tcp_ball:
+            self._tcp_ball.set_transform_space(normalized)
+        logger.debug("Changed TCP TransformControls space to %s", normalized)
 
     def _ensure_tcp_ball(self) -> None:
         """Create the unified TCP ball if missing.
@@ -345,7 +358,8 @@ class TCPControlsMixin:
         # Apply pose if the ball drifted, or FK just computed a new one.
         p = self._last_fk_pose
         if p and (
-            self._tcp_ball.x != p[0]
+            angles_changed
+            or self._tcp_ball.x != p[0]
             or self._tcp_ball.y != p[1]
             or self._tcp_ball.z != p[2]
         ):

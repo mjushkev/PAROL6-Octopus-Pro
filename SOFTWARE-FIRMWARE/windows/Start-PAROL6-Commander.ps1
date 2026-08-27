@@ -113,7 +113,7 @@ if (-not $NoBrowser) {
 Write-Host "PAROL6 Commander is running at $url"
 Write-Host "Robot profile: PAROL6-MATTJ-001"
 if ($Mode -eq "Hardware") {
-    Write-Host "Hardware mode: $ComPort, checksum-gated P6B1 transport, 10% firmware motion cap."
+    Write-Host "Hardware mode: $ComPort, checksum-gated P6B1 transport, 50% motion stage with protected J1/J2 Servo42C caps."
     Write-Warning "Physical collision checking is not yet available on this Windows runtime. Use no tool, clear the work area, and keep the main-power E-stop within reach during acceptance testing."
 } else {
     Write-Host "Mode: safe simulator (no physical motion)."
