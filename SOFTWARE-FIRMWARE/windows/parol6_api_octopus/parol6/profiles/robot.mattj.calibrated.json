@@ -1,0 +1,67 @@
+{
+  "schema": "parol6.production-calibration.v1",
+  "robot_id": "PAROL6-MATTJ-001",
+  "controller": {
+    "board": "BTT_OCTOPUS_PRO_V1_1_H723ZE",
+    "device_uid": "0028002F3233510536303431",
+    "source_export": "PAROL6_joint_limits_2026-08-25T22-21-29.562Z.json",
+    "source_flash_sequence": 60,
+    "validated_through_firmware": "0.8.12-calibration-rc"
+  },
+  "motion_model": {
+    "feedback": "commanded_step_count_open_loop",
+    "servo42c_mode": "CR_OPEN",
+    "encoder_integration": false,
+    "initial_speed_cap_percent": 10,
+    "j1_home_mode_default": "MANUAL",
+    "j1_auto_home_available": true,
+    "home_order": ["J1", "J2", "J3", "J4", "J6", "J5"]
+  },
+  "joints": [
+    {
+      "joint": "J1", "name": "Base", "motor_slot": "MOTOR0", "driver": "Servo42C",
+      "pulses_per_degree": 114, "home_raw": "-", "positive_raw": "+",
+      "sensor_active_level": "LOW", "home_behavior": "SENSOR_OR_MANUAL",
+      "minimum_deg": -230.0, "maximum_deg": 35.0
+    },
+    {
+      "joint": "J2", "name": "Shoulder", "motor_slot": "MOTOR1", "driver": "Servo42C",
+      "pulses_per_degree": 356, "home_raw": "-", "positive_raw": "+",
+      "sensor_active_level": "LOW", "home_behavior": "ACTIVE_RELEASE_TWO_PASS_MIN_ZERO",
+      "minimum_deg": 0.0, "maximum_deg": 119.536
+    },
+    {
+      "joint": "J3", "name": "Upper arm", "motor_slot": "MOTOR2", "driver": "TMC2209",
+      "pulses_per_degree": 161, "home_raw": "+", "positive_raw": "-",
+      "sensor_active_level": "LOW", "home_behavior": "ACTIVE_RELEASE_TWO_PASS_MIN_ZERO",
+      "minimum_deg": 0.0, "maximum_deg": 90.329
+    },
+    {
+      "joint": "J4", "name": "Elbow", "motor_slot": "MOTOR3", "driver": "TMC2209",
+      "pulses_per_degree": 36, "home_raw": "-", "positive_raw": "+",
+      "sensor_active_level": "LOW", "home_behavior": "TWO_PASS_POSITIVE_CLEAR_MIN_ZERO",
+      "minimum_deg": 0.0, "maximum_deg": 232.694
+    },
+    {
+      "joint": "J5", "name": "Wrist pitch", "motor_slot": "MOTOR4", "driver": "TMC2209",
+      "pulses_per_degree": 36, "home_raw": "+", "positive_raw": "+",
+      "sensor_active_level": "LOW", "home_behavior": "TWO_PASS_LATCH_ZERO",
+      "minimum_deg": -254.25, "maximum_deg": 0.0,
+      "post_home_standby_deg": -130.0
+    },
+    {
+      "joint": "J6", "name": "Wrist rotate", "motor_slot": "MOTOR5", "driver": "TMC2209",
+      "pulses_per_degree": 89, "home_raw": "-", "positive_raw": "+",
+      "sensor_active_level": "LOW", "home_behavior": "TWO_PASS_LATCH_ZERO",
+      "minimum_deg": -180.0, "maximum_deg": 180.0
+    }
+  ],
+  "provenance": [
+    "Owner-confirmed all six joints functional and calibrated on 2026-08-26.",
+    "J2 physical switch maps to PG10, J3 to PG12, and J5 to PG9.",
+    "J4 amendment: finish homing with a positive sensor-clear move and assign that clear position as 0 degree minimum.",
+    "J5 amendment: after the two-pass sensor latch establishes 0 degrees, move to -130 degrees as the standby position.",
+    "J1 manual home remains the default until its sensor is repaired; automatic sensor home is selectable by the operator.",
+    "J6 remains cable-limited to plus or minus 180 degrees and is never continuous."
+  ]
+}

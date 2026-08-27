@@ -1,0 +1,116 @@
+"""Factory for selecting between real serial and mock (inline simulation) transports based on configuration and environment."""
+
+import logging
+import os
+from typing import Any
+
+from parol6.config import get_com_port_with_fallback
+from parol6.server.transports.mock_serial_transport import MockSerialTransport
+from parol6.server.transports.octopus_buffered_transport import OctopusBufferedTransport
+from parol6.server.transports.serial_transport import SerialTransport
+
+logger = logging.getLogger(__name__)
+
+
+def is_simulation_mode() -> bool:
+    """Whether simulation mode is enabled via the PAROL6_FAKE_SERIAL environment variable."""
+    fake_serial = str(os.getenv("PAROL6_FAKE_SERIAL", "0")).lower()
+    return fake_serial in ("1", "true", "yes", "on")
+
+
+def create_transport(
+    transport_type: str | None = None,
+    port: str | None = None,
+    *,
+    baudrate: int,
+    **kwargs: Any,
+) -> SerialTransport | MockSerialTransport | OctopusBufferedTransport:
+    """
+    Create an appropriate transport instance based on configuration.
+
+    The factory will automatically select the appropriate transport:
+    - MockSerialTransport if PAROL6_FAKE_SERIAL is set
+    - SerialTransport otherwise
+
+    Args:
+        transport_type: Explicit transport type ('serial', 'mock', or None for auto)
+        port: Serial port name (for real serial)
+        baudrate: Baud rate for serial communication
+        **kwargs: Additional transport-specific parameters
+
+    Returns:
+        Transport instance (SerialTransport or MockSerialTransport)
+    """
+    if transport_type is None:
+        if is_simulation_mode():
+            transport_type = "mock"
+        else:
+            transport_type = os.getenv("PAROL6_TRANSPORT", "serial").strip().lower()
+
+    if transport_type == "mock":
+        logger.debug("Creating MockSerialTransport for simulation")
+        transport: MockSerialTransport | SerialTransport | OctopusBufferedTransport = MockSerialTransport(
+            port=port, baudrate=baudrate, **kwargs
+        )
+
+    elif transport_type == "serial":
+        logger.debug(f"Creating SerialTransport for port: {port}")
+        transport = SerialTransport(port=port, baudrate=baudrate, **kwargs)
+
+    elif transport_type in ("octopus", "octopus-buffered", "p6b1"):
+        logger.info("Creating checksum-gated P6B1 Octopus transport for port: %s", port)
+        transport = OctopusBufferedTransport(port=port, baudrate=baudrate, **kwargs)
+
+    else:
+        raise ValueError(f"Unknown transport type: {transport_type}")
+
+    return transport
+
+
+def create_and_connect_transport(
+    transport_type: str | None = None,
+    port: str | None = None,
+    *,
+    baudrate: int,
+    auto_find_port: bool = True,
+    **kwargs: Any,
+) -> SerialTransport | MockSerialTransport | OctopusBufferedTransport | None:
+    """
+    Create and connect a transport instance.
+
+    This is a convenience function that creates a transport and
+    attempts to connect it. For real serial, it can also attempt
+    to find and load a saved port.
+
+    Args:
+        transport_type: Transport type or None for auto-detect
+        port: Serial port or None
+        baudrate: Baud rate
+        auto_find_port: Whether to try loading saved port for serial
+        **kwargs: Additional parameters
+
+    Returns:
+        Connected transport instance or None if connection failed
+    """
+    # For mock transport, port finding is not needed
+    if is_simulation_mode() or transport_type == "mock":
+        transport = create_transport("mock", port=port, baudrate=baudrate, **kwargs)
+        if transport.connect():
+            return transport
+        return None
+
+    # For real serial, handle port finding
+    if not port and auto_find_port:
+        port = get_com_port_with_fallback()
+        if port:
+            logger.debug(f"Using saved serial port: {port}")
+
+    transport = create_transport(transport_type, port=port, baudrate=baudrate, **kwargs)
+
+    if port:
+        if transport.connect(port):
+            return transport
+        else:
+            logger.warning(f"Failed to connect to port: {port}")
+
+    return transport

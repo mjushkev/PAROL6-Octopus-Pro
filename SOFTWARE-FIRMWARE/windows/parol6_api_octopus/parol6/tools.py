@@ -1,0 +1,731 @@
+"""
+Typed tool configuration and registry for the PAROL6 robot.
+
+Each tool type has a frozen config dataclass that holds physical description,
+valid actions, and a ``populate_status()`` method the controller uses to fill
+the 50 Hz ``ToolStatus`` broadcast from hardware state.
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+from dataclasses import dataclass
+
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+import numpy as np
+from pinokin import se3_from_rpy, se3_from_trans
+from waldoctl import (
+    CameraSpec,
+    LinearMotion,
+    MeshRole,
+    MeshSpec,
+    PartMotion,
+    ToolState,
+    ToolVariant,
+)
+
+if TYPE_CHECKING:
+    from waldoctl import ToolSpec, ToolStatus
+
+    from parol6.commands.base import MotionCommand
+    from parol6.commands.gripper_commands import (
+        ElectricGripperCommand,
+        PneumaticGripperCommand,
+    )
+    from parol6.server.state import ControllerState
+    from parol6.server.transports.mock_serial_transport import MockRobotState
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Tool simulator protocol
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class ToolSimulator(Protocol):
+    """Protocol for tool-type-specific simulation logic.
+
+    Each tool config that needs simulation creates a simulator instance via
+    ``create_simulator()``. The simulator's ``resolve_params()`` is called
+    once on tool change, and ``tick()`` is called every simulation step.
+    """
+
+    def resolve_params(self, cfg: ToolConfig) -> None:
+        """Compute simulation parameters from the tool config."""
+        ...
+
+    def tick(self, state: MockRobotState, dt: float) -> None:
+        """Advance the tool simulation by *dt* seconds."""
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Base config
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ToolConfig:
+    """Immutable configuration for one tool type."""
+
+    name: str
+    description: str
+    transform: np.ndarray  # 4x4 homogeneous transform (flange → TCP)
+    meshes: tuple[MeshSpec, ...] = ()
+    motions: tuple[PartMotion, ...] = ()
+    variants: tuple[ToolVariant, ...] = ()
+    camera_spec: "CameraSpec | None" = None
+    """Optional camera attached to this tool. Wired through ``_build_tools``
+    into the live ``ToolSpec`` so the frontend can stream the feed when this
+    tool is active. The user can override the device per session via the
+    tool's ``runtime_settings.camera_device``."""
+
+    def populate_status(self, hw: ControllerState, out: ToolStatus) -> None:
+        """Fill *out* from hardware state. Override in subclasses."""
+
+    def create_command(self, action: str, params: list) -> MotionCommand | None:
+        """Create a command engine for this tool action. Returns None if not supported."""
+        return None
+
+    def create_simulator(self) -> ToolSimulator | None:
+        """Create a simulator for this tool type. Returns None if no simulation needed."""
+        return None
+
+    def estimate_duration(self, action: str, params: list) -> float:
+        """Estimate how long a tool action takes, in seconds.
+
+        Override in subclasses with physical models. Returns 0.0 by default.
+        """
+        return 0.0
+
+
+# ---------------------------------------------------------------------------
+# Gripper configs
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PneumaticGripperConfig(ToolConfig):
+    """Configuration for pneumatic grippers controlled via digital I/O."""
+
+    io_port: int = 1
+    valid_actions: tuple[str, ...] = ("open", "close", "move", "set_position")
+
+    def populate_status(self, hw: ControllerState, out: ToolStatus) -> None:
+        port_idx = 2 if self.io_port == 1 else 3
+        # Simulator writes the ramped position (0-255) into Gripper_data_in[1];
+        # real hardware has no position feedback, so fall back to the valve
+        # output. Convention: 0.0 = open, 1.0 = closed; the simulator ramps
+        # toward 255 for open, hence the inversion.
+        pos_byte = hw.Gripper_data_in[1]
+        if pos_byte > 0 or hw.InOut_out[port_idx] == 0:
+            out.positions = (1.0 - float(pos_byte) / 255.0,)
+        else:
+            out.positions = (1.0 - float(hw.InOut_out[port_idx]),)
+        out.part_detected = bool(hw.InOut_in[port_idx])
+        out.engaged = bool(hw.InOut_out[port_idx])
+        out.state = ToolState.IDLE
+
+    def create_command(self, action: str, params: list) -> PneumaticGripperCommand:
+        from parol6.commands.gripper_commands import PneumaticGripperCommand
+
+        if action not in self.valid_actions:
+            raise ValueError(f"Invalid action '{action}' for pneumatic gripper")
+        if action in ("move", "set_position"):
+            position = float(params[0]) if params and len(params) > 0 else 0.0
+            action = "open" if position < 0.5 else "close"
+        return PneumaticGripperCommand.from_tool_action(
+            action=action, port=self.io_port
+        )
+
+    def estimate_duration(self, action: str, params: list) -> float:
+        for m in self.motions:
+            if isinstance(m, LinearMotion) and m.estimated_speed_m_s:
+                return m.travel_m / m.estimated_speed_m_s
+        return 0.0
+
+    def create_simulator(self) -> PneumaticToolSimulator:
+        return PneumaticToolSimulator()
+
+
+@dataclass(frozen=True)
+class ElectricGripperConfig(ToolConfig):
+    """Configuration for electric grippers controlled via the serial gripper bus."""
+
+    current_range: tuple[int, int] = (0, 0)
+    position_range: tuple[float, float] = (0.0, 1.0)
+    speed_range: tuple[float, float] = (0.0, 1.0)
+    valid_actions: tuple[str, ...] = (
+        "move",
+        "open",
+        "close",
+        "set_position",
+        "calibrate",
+    )
+
+    # Motor controller / mechanical properties
+    encoder_cpr: int = 16_384  # encoder counts per revolution
+    gear_pd_mm: float = 12.0  # rack-and-pinion gear pitch diameter (mm)
+    firmware_speed_range_tps: tuple[int, int] = (
+        40,
+        80_000,
+    )  # CAN byte 0..255 → ticks/s
+    motor_kt: float = 0.0  # motor torque constant (Nm/A); 0 = force estimation disabled
+
+    def populate_status(self, hw: ControllerState, out: ToolStatus) -> None:
+        current_ma = float(hw.Gripper_data_in[3])
+        out.positions = (float(hw.Gripper_data_in[1]) / 255.0,)
+        out.channels = (current_ma,)
+        out.part_detected = bool(hw.Gripper_data_in[5])
+        out.engaged = bool(hw.Gripper_data_in[2])  # speed > 0
+        out.state = ToolState.IDLE
+
+    def create_command(self, action: str, params: list) -> ElectricGripperCommand:
+        from parol6.commands.gripper_commands import ElectricGripperCommand
+
+        if action not in self.valid_actions:
+            raise ValueError(f"Invalid action '{action}' for electric gripper")
+        # Translate Python-level method names to wire-level "move" action
+        if action == "open":
+            params = [0.0] + params[1:]
+            action = "move"
+        elif action == "close":
+            params = [1.0] + params[1:]
+            action = "move"
+        elif action == "set_position":
+            action = "move"
+        position = float(params[0]) if len(params) > 0 else 0.0
+        speed = float(params[1]) if len(params) > 1 else 0.5
+        current = int(params[2]) if len(params) > 2 else 500
+        return ElectricGripperCommand.from_tool_action(
+            action=action, position=position, speed=speed, current=current
+        )
+
+    def estimate_duration(self, action: str, params: list) -> float:
+        # Resolve position delta from action + params (same logic as create_command)
+        if action in ("open", "close"):
+            target = 0.0 if action == "open" else 1.0
+            speed = float(params[0]) if len(params) > 0 else 0.5
+        elif action in ("move", "set_position"):
+            target = float(params[0]) if len(params) > 0 else 0.0
+            speed = float(params[1]) if len(params) > 1 else 0.5
+        else:
+            return 0.0
+
+        # Assume worst-case full travel (0→target or 1→target)
+        pos_delta = max(target, 1.0 - target)
+        if pos_delta < 1e-6:
+            return 0.0
+
+        # Mirror the simulator's speed model
+        speed_byte = max(1, min(255, int(round(speed * 255))))
+        min_tps, max_tps = self.firmware_speed_range_tps
+        velocity_tps = min_tps + (speed_byte / 255.0) * (max_tps - min_tps)
+
+        travel_mm = 0.0
+        for m in self.motions:
+            if isinstance(m, LinearMotion):
+                travel_mm = m.travel_m * 1000.0
+                break
+        if travel_mm == 0.0:
+            return 0.0
+        tick_range = (travel_mm / (math.pi * self.gear_pd_mm)) * self.encoder_cpr
+
+        # Normalized velocity in position-byte units per second
+        norm_vel = (velocity_tps / tick_range) * 255.0
+        if norm_vel < 1e-9:
+            return 0.0
+
+        return (pos_delta * 255.0) / norm_vel
+
+    def create_simulator(self) -> ElectricGripperSimulator:
+        return ElectricGripperSimulator()
+
+
+# ---------------------------------------------------------------------------
+# Tool simulators
+# ---------------------------------------------------------------------------
+
+
+class PneumaticToolSimulator:
+    """Simulates binary-activation tool ramp (pneumatic grippers, vacuum, etc.).
+
+    Reads the commanded I/O output to determine whether the tool is
+    engaged, then ramps the tool position toward the target at the
+    physical speed derived from the tool's LinearMotion descriptor.
+    Writes the ramped position byte into ``gripper_data_in[1]`` for
+    ``populate_status()`` to read.
+    """
+
+    __slots__ = ("_io_port", "_ramp_speed")
+
+    def __init__(self) -> None:
+        self._io_port: int = -1
+        self._ramp_speed: float = 0.0
+
+    def resolve_params(self, cfg: ToolConfig) -> None:
+        self._io_port = -1
+        self._ramp_speed = 0.0
+
+        if not isinstance(cfg, PneumaticGripperConfig):
+            return
+
+        for m in cfg.motions:
+            if isinstance(m, LinearMotion) and m.estimated_speed_m_s:
+                # Normalized speed: fraction of full travel per second.
+                self._ramp_speed = m.estimated_speed_m_s / m.travel_m
+                break
+
+        if self._ramp_speed > 0:
+            # Map io_port to InOut_out index (port 1 -> index 2, port 2 -> index 3).
+            self._io_port = cfg.io_port + 1
+
+    def tick(self, state: MockRobotState, dt: float) -> None:
+        if self._io_port < 0:
+            return
+
+        # Commanded I/O output sets the target: 0 = closed, 1 = open.
+        io_val = float(state.io_out[self._io_port])
+        target = 1.0 if io_val > 0 else 0.0
+        if target != state.tool_ramp_target:
+            state.tool_ramp_target = target
+
+        error = state.tool_ramp_target - state.tool_ramp_current
+        if abs(error) < 1e-6:
+            return
+        step = self._ramp_speed * dt
+        if abs(error) <= step:
+            state.tool_ramp_current = state.tool_ramp_target
+        elif error > 0:
+            state.tool_ramp_current += step
+        else:
+            state.tool_ramp_current -= step
+
+        # gripper_data_in[1] is the same slot the electric simulator uses.
+        state.gripper_data_in[1] = int(state.tool_ramp_current * 255.0 + 0.5)
+
+        # Update part-detection input once the ramp reaches the target.
+        if abs(state.tool_ramp_current - state.tool_ramp_target) < 1e-6:
+            det_idx = self._io_port
+            state.io_in[det_idx] = 1 if state.tool_ramp_target < 0.5 else 0
+
+
+class ElectricGripperSimulator:
+    """Simulates electric gripper position ramp via the @njit ramp function.
+
+    Resolves tick_range, min/max speed from the tool config's mechanical
+    parameters and LinearMotion descriptor, then delegates per-tick
+    simulation to the ``_simulate_gripper_ramp_jit`` numba function.
+    """
+
+    __slots__ = ("_tick_range", "_min_speed", "_max_speed")
+
+    def __init__(self) -> None:
+        self._tick_range: float = 0.0
+        self._min_speed: float = 0.0
+        self._max_speed: float = 0.0
+
+    def resolve_params(self, cfg: ToolConfig) -> None:
+        if not isinstance(cfg, ElectricGripperConfig):
+            return
+        for m in cfg.motions:
+            if isinstance(m, LinearMotion):
+                travel_mm = m.travel_m * 1000.0
+                self._tick_range = (
+                    travel_mm / (math.pi * cfg.gear_pd_mm)
+                ) * cfg.encoder_cpr
+                break
+        min_tps, max_tps = cfg.firmware_speed_range_tps
+        self._min_speed = float(min_tps)
+        self._max_speed = float(max_tps)
+
+    def tick(self, state: MockRobotState, dt: float) -> None:
+        from parol6.server.transports.mock_serial_transport import (
+            _simulate_gripper_ramp_jit,
+        )
+
+        state.gripper_pos_f = _simulate_gripper_ramp_jit(
+            state.gripper_ramp,
+            state.gripper_data_in,
+            state.gripper_pos_f,
+            dt,
+            self._tick_range,
+            self._min_speed,
+            self._max_speed,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Registry
+# ---------------------------------------------------------------------------
+
+_TOOL_REGISTRY: dict[str, ToolConfig] = {}
+
+
+def register_tool(key: str, config: ToolConfig) -> None:
+    """Register a tool configuration by key (e.g. ``"PNEUMATIC"``)."""
+    _TOOL_REGISTRY[key] = config
+
+
+def get_registry() -> dict[str, ToolConfig]:
+    """Return the tool registry (read-only view not enforced — callers cooperate)."""
+    return _TOOL_REGISTRY
+
+
+def list_tools() -> list[str]:
+    """Get list of available tool keys."""
+    return list(_TOOL_REGISTRY.keys())
+
+
+def _tool_config_from_spec(spec: "ToolSpec") -> ToolConfig:
+    """Build a minimal controller :class:`ToolConfig` from a waldoctl ToolSpec
+    (TCP transform only; base no-op status/command suit non-actuated tools)."""
+    transform = np.zeros((4, 4), dtype=np.float64)
+    ox, oy, oz = spec.tcp_origin
+    rx, ry, rz = spec.tcp_rpy
+    se3_from_rpy(ox, oy, oz, rx, ry, rz, transform)
+    return ToolConfig(
+        name=spec.display_name,
+        description=spec.description,
+        transform=transform,
+        meshes=spec.meshes,
+        motions=spec.motions,
+        variants=spec.variants,
+        camera_spec=spec.camera_spec,
+    )
+
+
+_PLUGIN_KEYS: set[str] = set()
+
+
+def plugin_tool_keys() -> frozenset[str]:
+    """Keys added by :func:`register_plugin_tools` (vs. native registrations)."""
+    return frozenset(_PLUGIN_KEYS)
+
+
+def register_plugin_tools() -> int:
+    """Register ``waldoctl.tools`` entry-point tools into the controller registry
+    so ``SELECT_TOOL`` resolves their TCP. Idempotent; no-op when none installed;
+    on collision the first registration wins (natives register at import time).
+    Returns the number added."""
+    from waldoctl.discovery import iter_plugin_tool_specs
+
+    count = 0
+    for spec in iter_plugin_tool_specs():
+        if spec.key != spec.key.upper():
+            logger.warning(
+                "Plugin tool key %r is not uppercase; SELECT_TOOL uppercases "
+                "names on the wire, so this tool cannot be selected",
+                spec.key,
+            )
+        if spec.key in _TOOL_REGISTRY:
+            continue
+        _TOOL_REGISTRY[spec.key] = _tool_config_from_spec(spec)
+        _PLUGIN_KEYS.add(spec.key)
+        count += 1
+    if count:
+        logger.info("Registered %d plugin tool(s) into the controller registry", count)
+    return count
+
+
+def get_tool_transform(
+    tool_name: str,
+    variant_key: str | None = None,
+) -> np.ndarray:
+    """Get the 4x4 transformation matrix for a tool or variant.
+
+    When *variant_key* is given and matches, the variant's ``tcp_origin`` /
+    ``tcp_rpy`` override the tool-level transform field-independently
+    (matching the client-side ToolSpec semantics).
+
+    Raises ValueError if *tool_name* is not registered.
+    """
+    cfg = _TOOL_REGISTRY.get(tool_name)
+    if cfg is None:
+        raise ValueError(f"Unknown tool '{tool_name}'. Available: {list_tools()}")
+    if variant_key:
+        for v in cfg.variants:
+            if v.key == variant_key:
+                out = cfg.transform.copy()
+                if v.tcp_rpy is not None:
+                    rot = np.zeros((4, 4), dtype=np.float64)
+                    se3_from_rpy(0.0, 0.0, 0.0, *v.tcp_rpy, rot)
+                    out[:3, :3] = rot[:3, :3]
+                if v.tcp_origin is not None:
+                    out[:3, 3] = v.tcp_origin
+                return out
+        logger.warning("Variant '%s' not found for tool '%s'", variant_key, tool_name)
+    return cfg.transform
+
+
+# ---------------------------------------------------------------------------
+# Built-in PAROL6 tools — registered at import time
+# ---------------------------------------------------------------------------
+
+
+def _make_tcp_transform(
+    x: float = 0.0,
+    y: float = 0.0,
+    z: float = 0.0,
+) -> np.ndarray:
+    """TCP transform for a tool mounted on the flange.
+
+    Pure translation — tool frame orientation matches the flange.
+    """
+    out = np.zeros((4, 4), dtype=np.float64)
+    se3_from_trans(x, y, z, out)
+    return out
+
+
+_TCP_RPY = (0.0, 0.0, 0.0)
+
+# All PAROL6 tool meshes were designed with Rx(π) in the kinematic chain.
+# The kinematic transform is pure translation (for correct IK), so the
+# rotation lives on the mesh definitions instead.
+_MESH_RPY = (math.pi, 0.0, 0.0)
+
+
+register_tool(
+    "NONE",
+    ToolConfig(
+        name="No Tool",
+        description="Bare flange - no tool attached",
+        transform=np.eye(4, dtype=np.float64),
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
+# Pneumatic gripper — vertical & horizontal mounting variants
+# ---------------------------------------------------------------------------
+
+_PNEUMATIC_VERTICAL_MESHES = (
+    MeshSpec(file="pneumatic_gripper_vertical_body_simplified.stl", role=MeshRole.BODY),
+    MeshSpec(
+        file="pneumatic_gripper_vertical_right_jaw_simplified.stl", role=MeshRole.JAW
+    ),
+    MeshSpec(
+        file="pneumatic_gripper_vertical_left_jaw_simplified.stl", role=MeshRole.JAW
+    ),
+)
+_PNEUMATIC_VERTICAL_MOTION = (
+    LinearMotion(
+        role=MeshRole.JAW,
+        axis=(0.0, 1.0, 0.0),
+        travel_m=0.0035,
+        symmetric=True,
+        estimated_speed_m_s=0.023,
+        estimated_accel_m_s2=2.0,
+    ),
+)
+
+_PNEUMATIC_HORIZONTAL_MESHES = (
+    MeshSpec(
+        file="pneumatic_gripper_horizontal_body_simplified.stl", role=MeshRole.BODY
+    ),
+    MeshSpec(
+        file="pneumatic_gripper_horizontal_right_jaw_simplified.stl", role=MeshRole.JAW
+    ),
+    MeshSpec(
+        file="pneumatic_gripper_horizontal_left_jaw_simplified.stl", role=MeshRole.JAW
+    ),
+)
+_PNEUMATIC_HORIZONTAL_MOTION = (
+    LinearMotion(
+        role=MeshRole.JAW,
+        axis=(1.0, 0.0, 0.0),
+        travel_m=0.01045,
+        symmetric=True,
+        estimated_speed_m_s=0.07,
+        estimated_accel_m_s2=2.0,
+    ),
+)
+
+register_tool(
+    "PNEUMATIC",
+    PneumaticGripperConfig(
+        name="Pneumatic Gripper",
+        description="Pneumatic gripper assembly (vertical/horizontal mounting)",
+        transform=_make_tcp_transform(x=-0.055, z=-0.027),
+        meshes=_PNEUMATIC_VERTICAL_MESHES,
+        motions=_PNEUMATIC_VERTICAL_MOTION,
+        variants=(
+            ToolVariant(
+                key="vertical",
+                display_name="Vertical",
+                meshes=_PNEUMATIC_VERTICAL_MESHES,
+                motions=_PNEUMATIC_VERTICAL_MOTION,
+                tcp_origin=(-0.055, 0.0, -0.027),
+                tcp_rpy=_TCP_RPY,
+            ),
+            ToolVariant(
+                key="horizontal",
+                display_name="Horizontal",
+                meshes=_PNEUMATIC_HORIZONTAL_MESHES,
+                motions=_PNEUMATIC_HORIZONTAL_MOTION,
+                tcp_origin=(0.0, 0.0, -0.082),
+                tcp_rpy=_TCP_RPY,
+            ),
+        ),
+        io_port=1,
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
+# SSG-48 electric gripper — finger & pinch jaw variants
+# ---------------------------------------------------------------------------
+
+_SSG48_JAW_MOTION = (
+    LinearMotion(
+        role=MeshRole.JAW, axis=(0.0, 1.0, 0.0), travel_m=0.024, symmetric=True
+    ),
+)
+
+_SSG48_FINGER_MESHES = (
+    MeshSpec(file="ssg48_body_simplified.stl", role=MeshRole.BODY),
+    MeshSpec(file="ssg48_finger_right_simplified.stl", role=MeshRole.JAW),
+    MeshSpec(file="ssg48_finger_left_simplified.stl", role=MeshRole.JAW),
+)
+
+_SSG48_PINCH_MESHES = (
+    MeshSpec(file="ssg48_body_simplified.stl", role=MeshRole.BODY),
+    MeshSpec(file="ssg48_pinch_right_simplified.stl", role=MeshRole.JAW),
+    MeshSpec(file="ssg48_pinch_left_simplified.stl", role=MeshRole.JAW),
+)
+
+register_tool(
+    "SSG-48",
+    ElectricGripperConfig(
+        name="SSG-48 Electric Gripper",
+        description="SSG-48 adaptive electric gripper (Spectral micro BLDC)",
+        transform=_make_tcp_transform(z=-0.105),
+        meshes=_SSG48_FINGER_MESHES,
+        motions=_SSG48_JAW_MOTION,
+        variants=(
+            ToolVariant(
+                key="finger",
+                display_name="Finger",
+                meshes=_SSG48_FINGER_MESHES,
+                motions=_SSG48_JAW_MOTION,
+                tcp_origin=(0.0, 0.0, -0.105),
+                tcp_rpy=_TCP_RPY,
+            ),
+            ToolVariant(
+                key="pinch",
+                display_name="Pinch",
+                meshes=_SSG48_PINCH_MESHES,
+                motions=_SSG48_JAW_MOTION,
+                tcp_origin=(0.0, 0.0, -0.105),
+                tcp_rpy=_TCP_RPY,
+            ),
+        ),
+        position_range=(0.0, 1.0),
+        speed_range=(0.0, 1.0),
+        current_range=(100, 1300),
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
+# MSG AI stepper gripper — 100mm, 150mm, 200mm rail variants
+# ---------------------------------------------------------------------------
+
+_MSG_100_JAW_MOTION = (
+    LinearMotion(
+        role=MeshRole.JAW, axis=(0.0, 1.0, 0.0), travel_m=0.0267, symmetric=True
+    ),
+)
+_MSG_150_JAW_MOTION = (
+    LinearMotion(
+        role=MeshRole.JAW, axis=(0.0, 1.0, 0.0), travel_m=0.0514, symmetric=True
+    ),
+)
+_MSG_200_JAW_MOTION = (
+    LinearMotion(
+        role=MeshRole.JAW, axis=(0.0, 1.0, 0.0), travel_m=0.0767, symmetric=True
+    ),
+)
+
+_MSG_100_MESHES = (
+    MeshSpec(file="msg_ai_100_body_simplified.stl", role=MeshRole.BODY),
+    MeshSpec(file="msg_ai_100_right_jaw_simplified.stl", role=MeshRole.JAW),
+    MeshSpec(file="msg_ai_100_left_jaw_simplified.stl", role=MeshRole.JAW),
+)
+
+_MSG_150_MESHES = (
+    MeshSpec(file="msg_ai_150_body_simplified.stl", role=MeshRole.BODY),
+    MeshSpec(file="msg_ai_150_right_jaw_simplified.stl", role=MeshRole.JAW),
+    MeshSpec(file="msg_ai_150_left_jaw_simplified.stl", role=MeshRole.JAW),
+)
+
+_MSG_200_MESHES = (
+    MeshSpec(file="msg_ai_200_body_simplified.stl", role=MeshRole.BODY),
+    MeshSpec(file="msg_ai_200_right_jaw_simplified.stl", role=MeshRole.JAW),
+    MeshSpec(file="msg_ai_200_left_jaw_simplified.stl", role=MeshRole.JAW),
+)
+
+register_tool(
+    "MSG",
+    ElectricGripperConfig(
+        name="MSG AI Stepper Gripper",
+        description="MSG compliant AI stepper gripper (StepFOC)",
+        transform=_make_tcp_transform(x=-0.029, z=-0.103),
+        meshes=_MSG_100_MESHES,
+        motions=_MSG_100_JAW_MOTION,
+        variants=(
+            ToolVariant(
+                key="100mm",
+                display_name="100mm Rail",
+                meshes=_MSG_100_MESHES,
+                motions=_MSG_100_JAW_MOTION,
+                tcp_origin=(-0.029, 0.0, -0.103),
+                tcp_rpy=_TCP_RPY,
+            ),
+            ToolVariant(
+                key="150mm",
+                display_name="150mm Rail",
+                meshes=_MSG_150_MESHES,
+                motions=_MSG_150_JAW_MOTION,
+                tcp_origin=(-0.029, 0.0, -0.103),
+                tcp_rpy=_TCP_RPY,
+            ),
+            ToolVariant(
+                key="200mm",
+                display_name="200mm Rail",
+                meshes=_MSG_200_MESHES,
+                motions=_MSG_200_JAW_MOTION,
+                tcp_origin=(-0.029, 0.0, -0.103),
+                tcp_rpy=_TCP_RPY,
+            ),
+        ),
+        position_range=(0.0, 1.0),
+        speed_range=(0.0, 1.0),
+        current_range=(100, 2800),
+        gear_pd_mm=16.67,  # 32P 21T gear: PD = 21/32" = 16.67mm
+        firmware_speed_range_tps=(500, 60_000),  # StepFOC velocity range
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
+# Vacuum gripper — pneumatic valve control, no jaws
+# ---------------------------------------------------------------------------
+
+register_tool(
+    "VACUUM",
+    PneumaticGripperConfig(
+        name="Vacuum Gripper",
+        description="Vacuum gripper (pneumatic valve I/O)",
+        transform=_make_tcp_transform(z=-0.037),
+        meshes=(
+            MeshSpec(file="vacuum_gripper_body_simplified.stl", role=MeshRole.BODY),
+        ),
+        motions=(),
+        io_port=1,
+    ),
+)

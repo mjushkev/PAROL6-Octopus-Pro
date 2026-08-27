@@ -1,0 +1,30 @@
+.*/
+!.github/
+*.pyc
+*.log
+*.out
+programs/*
+!programs/demo_showcase.py
+!programs/draw_circle.py
+!programs/precision.py
+!programs/speed_comparison.py
+!programs/zigzag_scan.py
+!programs/cycle_start.py
+build/*
+*.egg-info
+screenshots*
+test-results.xml
+*.nbc
+*.nbi
+
+# MkDocs build output
+site/
+
+# Local development directories
+PAROL6-Desktop-robot-arm/
+PAROL6-python-API/
+Spectral-Micro-BLDC-controller/
+nicegui/
+pinokin/
+/tools/
+waldoctl/

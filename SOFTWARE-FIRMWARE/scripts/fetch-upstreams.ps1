@@ -7,9 +7,10 @@ if (-not $Destination) { $Destination = Join-Path $projectRoot ".cache\upstreams
 New-Item -ItemType Directory -Force -Path $Destination | Out-Null
 
 $sources = @(
-    @{ Name="waldo-commander"; Url="https://github.com/Jepson2k/Waldo-Commander.git"; Revision="d5acbe1bea86cf1f207b8e912b8e36f9d7dbaf91" },
+    @{ Name="waldo-commander"; Url="https://github.com/Jepson2k/Waldo-Commander.git"; Revision="3de942af856f1727eaa01dc8f8d81d7cf564cb6d" },
     @{ Name="parol6-python-api"; Url="https://github.com/PCrnjak/PAROL6-python-API.git"; Revision="829c2c73051c18d9cbf2e4cb07508a1557f63294" },
-    @{ Name="waldoctl"; Url="https://github.com/Jepson2k/waldoctl.git"; Revision="9ceab01e9b43495f4115cda90d26563220a1466a" }
+    @{ Name="waldoctl"; Url="https://github.com/Jepson2k/waldoctl.git"; Revision="9ceab01e9b43495f4115cda90d26563220a1466a" },
+    @{ Name="pinokin"; Url="https://github.com/Jepson2k/pinokin.git"; Revision="68ed69755b99ac7fc3b7894792b76f1dad3b8a4b" }
 )
 
 foreach ($source in $sources) {
@@ -26,4 +27,3 @@ foreach ($source in $sources) {
     if ($actual -ne $source.Revision) { throw "Revision mismatch for $($source.Name): $actual" }
     Write-Host "$($source.Name): $actual"
 }
-

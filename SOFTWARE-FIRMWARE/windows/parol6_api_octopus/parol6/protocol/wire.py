@@ -1,0 +1,1911 @@
+"""
+Wire protocol for PAROL6 robot communication.
+
+This module contains all protocol definitions:
+- Binary serial frame packing/unpacking (firmware communication)
+- Msgpack message types and structs (UDP communication)
+- Command/response encoding and decoding
+
+Wire format uses msgpack arrays with integer type codes:
+- OK:       MsgType.OK (just the integer)
+- ERROR:    [MsgType.ERROR, message]
+- STATUS:   [MsgType.STATUS, pose, angles, speeds, io, action_current, action_state, joint_en, cart_en_wrf, cart_en_trf, executing_index, completed_index, last_checkpoint, error, queued_segments, queued_duration, action_params, tool_status, tcp_speed, simulator_active, collision_active, collision_pairs, scene_epoch, accepted_index, homed]
+- RESPONSE: [MsgType.RESPONSE, query_type, value]
+- COMMAND:  [CmdType.XXX, ...params]
+"""
+
+import logging
+from dataclasses import dataclass, field
+from enum import IntEnum, auto
+from typing import Annotated, TypeAlias, Union, cast
+
+import msgspec
+import numpy as np
+import ormsgpack
+from numba import njit
+
+from parol6.config import LIMITS
+from waldoctl import ActionState, ToolStatus
+from waldoctl.tools import ToolState
+
+from parol6.tools import get_registry, list_tools
+from parol6.utils.error_catalog import RobotError, make_error
+from parol6.utils.error_codes import ErrorCode
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Numpy msgpack encoding hooks
+# =============================================================================
+
+
+def _enc_hook(obj: object) -> object:
+    """Custom encoder hook for numpy types."""
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()  # type: ignore[no-matching-overload, ty:no-matching-overload]
+    if isinstance(obj, (np.integer, np.floating)):
+        return obj.item()
+    raise NotImplementedError(f"Cannot encode {type(obj)}")
+
+
+# Module-level encoder with numpy support (thread-safe, reusable)
+_encoder = msgspec.msgpack.Encoder(enc_hook=_enc_hook)
+
+# Module-level decoder for generic msgpack
+_decoder = msgspec.msgpack.Decoder()
+
+
+# =============================================================================
+# Message Types
+# =============================================================================
+
+
+class MsgType(IntEnum):
+    """Message type codes for responses."""
+
+    OK = auto()
+    ERROR = auto()
+    STATUS = auto()
+    RESPONSE = auto()
+
+
+class QueryType(IntEnum):
+    """Query type codes for responses."""
+
+    PING = auto()
+    STATUS = auto()
+    ANGLES = auto()
+    POSE = auto()
+    IO = auto()
+    SPEEDS = auto()
+    TOOL = auto()
+    QUEUE = auto()
+    CURRENT_ACTION = auto()
+    LOOP_STATS = auto()
+    PROFILE = auto()
+    TOOL_STATUS = auto()
+    ENABLEMENT = auto()
+    ERROR = auto()
+    TCP_SPEED = auto()
+    IS_SIMULATOR = auto()
+    TCP_OFFSET = auto()
+    SHAPES = auto()
+
+
+class CmdType(IntEnum):
+    """Command type codes for incoming commands.
+
+    Wire format: [CmdType.XXX, ...params]
+    """
+
+    # Query commands (immediate, read-only)
+    PING = auto()
+    STATUS = auto()
+    ANGLES = auto()
+    POSE = auto()
+    IO = auto()
+    JOINT_SPEEDS = auto()
+    TOOLS = auto()
+    QUEUE = auto()
+    ACTIVITY = auto()
+    LOOP_STATS = auto()
+    PROFILE = auto()
+    REACHABLE = auto()
+    ERROR = auto()
+    TCP_SPEED = auto()
+    TCP_OFFSET = auto()
+
+    # System commands (execute regardless of enable state)
+    RESET = auto()
+    ESTOP = auto()
+    STOP = auto()
+    WRITE_IO = auto()
+    CONNECT_HARDWARE = auto()
+    SIMULATOR = auto()
+    SELECT_PROFILE = auto()
+    RESET_STATE = auto()
+    RESET_LOOP_STATS = auto()
+
+    # Motion commands — queued, pre-computed trajectory
+    HOME = auto()
+    MOVEJ = auto()
+    MOVEJ_POSE = auto()
+    MOVEL = auto()
+    MOVEC = auto()
+    MOVES = auto()
+    MOVEP = auto()
+    SELECT_TOOL = auto()
+    SET_TCP_OFFSET = auto()
+    DELAY = auto()
+    CHECKPOINT = auto()
+
+    # Streaming commands — position (servo) and velocity (jog)
+    TELEPORT = auto()
+    SERVOJ = auto()
+    SERVOJ_POSE = auto()
+    SERVOL = auto()
+    JOGJ = auto()
+    JOGL = auto()
+
+    # Tool commands
+    TOOL_ACTION = auto()
+    TOOL_STATUS = auto()
+
+    # Simulator state query
+    IS_SIMULATOR = auto()
+    # Workspace collision-world shapes (keep-out geometry)
+    SET_SHAPES = auto()
+    # Collision-world readback query (installation + program layers)
+    SHAPES = auto()
+    # Owner hardware option: manual J1 zero now, sensor homing after repair.
+    SET_J1_HOME_MODE = auto()
+
+
+# =============================================================================
+# Command Structs - Tagged Union for single-pass decode
+# Wire format: [CmdType.XXX, ...fields]
+# =============================================================================
+
+
+def _check_speed_accel(speed: float, accel: float, *, signed: bool = False) -> None:
+    """Validate speed/accel are in the expected fractional range."""
+    lo = -1.0 if signed else 0.0
+    if not (lo <= speed <= 1.0):
+        raise ValueError(
+            f"speed={speed} is out of range [{lo}, 1.0]. "
+            "Speed is a fraction of max velocity, not a percentage."
+        )
+    if not (0.0 <= accel <= 1.0):
+        raise ValueError(
+            f"accel={accel} is out of range [0.0, 1.0]. "
+            "Accel is a fraction of max acceleration, not a percentage."
+        )
+
+
+class MotionParamsMixin:
+    """Mixin providing resolved motion parameters for wire structs.
+
+    Handles both sentinel patterns:
+    - Move commands use 0.0 as "not specified"
+    - Curved/spline commands use None as "not specified"
+
+    Field declarations live on the concrete Struct subclasses, not here,
+    to avoid Pylance invariance errors on override.
+    """
+
+    __slots__ = ()
+
+    accel: float
+
+    @property
+    def resolved_duration(self) -> float | None:
+        """Duration in seconds, or None for velocity-based timing."""
+        d = cast("float | None", getattr(self, "duration"))
+        return d if d is not None and d > 0.0 else None
+
+    @property
+    def resolved_speed(self) -> float:
+        """Velocity fraction 0-1, defaults to 1.0 (full speed)."""
+        s = cast("float | None", getattr(self, "speed"))
+        return s if s is not None and s > 0.0 else 1.0
+
+
+# -- Queued move commands (pre-computed trajectory) --
+
+
+class MoveJCmd(
+    MotionParamsMixin,
+    msgspec.Struct,
+    tag=int(CmdType.MOVEJ),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """MOVEJ: joint-space move to target angles (degrees)."""
+
+    angles: Annotated[list[float], msgspec.Meta(min_length=6, max_length=6)]
+    duration: Annotated[float, msgspec.Meta(ge=0.0)] = 0.0
+    speed: Annotated[float, msgspec.Meta(ge=0.0, le=1.0)] = 0.0
+    accel: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] = 1.0
+    r: Annotated[float, msgspec.Meta(ge=0.0)] = 0.0
+    rel: bool = False
+
+    def __post_init__(self) -> None:
+        has_duration = self.duration > 0.0
+        has_speed = self.speed > 0.0
+        if not has_duration and not has_speed:
+            raise ValueError("MOVEJ requires either duration > 0 or speed > 0")
+        if has_duration and has_speed:
+            raise ValueError("MOVEJ requires only one of duration or speed")
+        _check_speed_accel(self.speed, self.accel)
+        if not self.rel:
+            for i in range(6):
+                if not (
+                    LIMITS.joint.position.deg[i, 0]
+                    <= self.angles[i]
+                    <= LIMITS.joint.position.deg[i, 1]
+                ):
+                    raise ValueError(
+                        f"Joint {i + 1} target ({self.angles[i]:.1f} deg) is out of range"
+                    )
+
+
+class MoveJPoseCmd(
+    MotionParamsMixin,
+    msgspec.Struct,
+    tag=int(CmdType.MOVEJ_POSE),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """MOVEJ_POSE: joint-space move to a Cartesian pose (IK at target)."""
+
+    pose: Annotated[list[float], msgspec.Meta(min_length=6, max_length=6)]
+    duration: Annotated[float, msgspec.Meta(ge=0.0)] = 0.0
+    speed: Annotated[float, msgspec.Meta(ge=0.0, le=1.0)] = 0.0
+    accel: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] = 1.0
+    r: Annotated[float, msgspec.Meta(ge=0.0)] = 0.0
+
+    def __post_init__(self) -> None:
+        has_duration = self.duration > 0.0
+        has_speed = self.speed > 0.0
+        if not has_duration and not has_speed:
+            raise ValueError("MOVEJ_POSE requires either duration > 0 or speed > 0")
+        if has_duration and has_speed:
+            raise ValueError("MOVEJ_POSE requires only one of duration or speed")
+        _check_speed_accel(self.speed, self.accel)
+
+
+class MoveLCmd(
+    MotionParamsMixin,
+    msgspec.Struct,
+    tag=int(CmdType.MOVEL),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """MOVEL: linear Cartesian move to target pose."""
+
+    pose: Annotated[list[float], msgspec.Meta(min_length=6, max_length=6)]
+    frame: Annotated[str, msgspec.Meta(pattern=r"^(WRF|TRF)$")] = "WRF"
+    duration: Annotated[float, msgspec.Meta(ge=0.0)] = 0.0
+    speed: Annotated[float, msgspec.Meta(ge=0.0, le=1.0)] = 0.0
+    accel: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] = 1.0
+    r: Annotated[float, msgspec.Meta(ge=0.0)] = 0.0
+    rel: bool = False
+
+    def __post_init__(self) -> None:
+        has_duration = self.duration > 0.0
+        has_speed = self.speed > 0.0
+        if not has_duration and not has_speed:
+            raise ValueError("MOVEL requires either duration > 0 or speed > 0")
+        if has_duration and has_speed:
+            raise ValueError("MOVEL requires only one of duration or speed")
+        _check_speed_accel(self.speed, self.accel)
+
+
+class MoveCCmd(
+    MotionParamsMixin,
+    msgspec.Struct,
+    tag=int(CmdType.MOVEC),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """MOVEC: circular arc through current → via → end."""
+
+    via: Annotated[list[float], msgspec.Meta(min_length=6, max_length=6)]
+    end: Annotated[list[float], msgspec.Meta(min_length=6, max_length=6)]
+    frame: Annotated[str, msgspec.Meta(pattern=r"^(WRF|TRF)$")] = "WRF"
+    duration: Annotated[float, msgspec.Meta(ge=0.0)] | None = None
+    speed: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] | None = None
+    accel: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] = 1.0
+    r: Annotated[float, msgspec.Meta(ge=0.0)] = 0.0
+
+    def __post_init__(self) -> None:
+        has_duration = self.duration is not None and self.duration > 0.0
+        has_speed = self.speed is not None and self.speed > 0.0
+        if not has_duration and not has_speed:
+            raise ValueError("MOVEC requires either duration > 0 or speed > 0")
+        if has_duration and has_speed:
+            raise ValueError("MOVEC requires only one of duration or speed")
+        if self.speed is not None:
+            _check_speed_accel(self.speed, self.accel)
+
+
+class MoveSCmd(
+    MotionParamsMixin,
+    msgspec.Struct,
+    tag=int(CmdType.MOVES),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """MOVES: cubic spline through waypoints."""
+
+    waypoints: Annotated[list[list[float]], msgspec.Meta(min_length=2)]
+    frame: Annotated[str, msgspec.Meta(pattern=r"^(WRF|TRF)$")] = "WRF"
+    duration: Annotated[float, msgspec.Meta(ge=0.0)] | None = None
+    speed: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] | None = None
+    accel: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] = 1.0
+
+    def __post_init__(self) -> None:
+        has_duration = self.duration is not None and self.duration > 0.0
+        has_speed = self.speed is not None and self.speed > 0.0
+        if not has_duration and not has_speed:
+            raise ValueError("MOVES requires either duration > 0 or speed > 0")
+        if has_duration and has_speed:
+            raise ValueError("MOVES requires only one of duration or speed")
+        if self.speed is not None:
+            _check_speed_accel(self.speed, self.accel)
+        waypoints = self.waypoints
+        for i in range(len(waypoints)):
+            if len(waypoints[i]) != 6:
+                raise ValueError(f"Waypoint {i} must have 6 values (x,y,z,rx,ry,rz)")
+
+
+class MovePCmd(
+    MotionParamsMixin,
+    msgspec.Struct,
+    tag=int(CmdType.MOVEP),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """MOVEP: process move — constant TCP speed with auto-blending at corners."""
+
+    waypoints: Annotated[list[list[float]], msgspec.Meta(min_length=2)]
+    frame: Annotated[str, msgspec.Meta(pattern=r"^(WRF|TRF)$")] = "WRF"
+    duration: Annotated[float, msgspec.Meta(ge=0.0)] | None = None
+    speed: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] | None = None
+    accel: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] = 1.0
+
+    def __post_init__(self) -> None:
+        has_duration = self.duration is not None and self.duration > 0.0
+        has_speed = self.speed is not None and self.speed > 0.0
+        if not has_duration and not has_speed:
+            raise ValueError("MOVEP requires either duration > 0 or speed > 0")
+        if has_duration and has_speed:
+            raise ValueError("MOVEP requires only one of duration or speed")
+        if self.speed is not None:
+            _check_speed_accel(self.speed, self.accel)
+        waypoints = self.waypoints
+        for i in range(len(waypoints)):
+            if len(waypoints[i]) != 6:
+                raise ValueError(f"Waypoint {i} must have 6 values (x,y,z,rx,ry,rz)")
+
+
+class CheckpointCmd(
+    msgspec.Struct,
+    tag=int(CmdType.CHECKPOINT),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """CHECKPOINT: queue marker for progress tracking."""
+
+    label: Annotated[str, msgspec.Meta(min_length=1, max_length=128)]
+
+
+# -- Streaming commands: servo (position) --
+
+
+class ServoJCmd(
+    msgspec.Struct,
+    tag=int(CmdType.SERVOJ),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """SERVOJ: streaming joint position target (degrees)."""
+
+    angles: Annotated[list[float], msgspec.Meta(min_length=6, max_length=6)]
+    speed: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] = 1.0
+    accel: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] = 1.0
+
+
+class ServoJPoseCmd(
+    msgspec.Struct,
+    tag=int(CmdType.SERVOJ_POSE),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """SERVOJ_POSE: streaming joint position target via Cartesian pose (IK)."""
+
+    pose: Annotated[list[float], msgspec.Meta(min_length=6, max_length=6)]
+    speed: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] = 1.0
+    accel: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] = 1.0
+
+
+class ServoLCmd(
+    msgspec.Struct,
+    tag=int(CmdType.SERVOL),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """SERVOL: streaming linear Cartesian position target."""
+
+    pose: Annotated[list[float], msgspec.Meta(min_length=6, max_length=6)]
+    speed: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] = 1.0
+    accel: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] = 1.0
+
+
+# -- Streaming commands: jog (velocity) --
+
+
+class JogJCmd(
+    msgspec.Struct,
+    tag=int(CmdType.JOGJ),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """JOGJ: streaming joint velocity. Static 6-element signed speed fractions."""
+
+    speeds: Annotated[list[float], msgspec.Meta(min_length=6, max_length=6)]
+    duration: Annotated[float, msgspec.Meta(gt=0.0)]
+    accel: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] = 1.0
+
+    def __post_init__(self) -> None:
+        for i in range(6):
+            if not (-1.0 <= self.speeds[i] <= 1.0):
+                raise ValueError(
+                    f"Speed[{i}]={self.speeds[i]} out of range [-1.0, 1.0]"
+                )
+
+
+class JogLCmd(
+    msgspec.Struct,
+    tag=int(CmdType.JOGL),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """JOGL: streaming Cartesian velocity. Static 6-element [vx,vy,vz,wx,wy,wz]."""
+
+    velocities: Annotated[list[float], msgspec.Meta(min_length=6, max_length=6)]
+    duration: Annotated[float, msgspec.Meta(gt=0.0)]
+    frame: Annotated[str, msgspec.Meta(pattern=r"^(WRF|TRF)$")] = "WRF"
+    accel: Annotated[float, msgspec.Meta(gt=0.0, le=1.0)] = 1.0
+
+    def __post_init__(self) -> None:
+        for i in range(6):
+            if not (-1.0 <= self.velocities[i] <= 1.0):
+                raise ValueError(
+                    f"Velocity[{i}]={self.velocities[i]} out of range [-1.0, 1.0]"
+                )
+
+
+class HomeCmd(
+    msgspec.Struct, tag=int(CmdType.HOME), array_like=True, frozen=True, gc=False
+):
+    """HOME: [CmdType.HOME]"""
+
+    pass
+
+
+class ResetCmd(
+    msgspec.Struct, tag=int(CmdType.RESET), array_like=True, frozen=True, gc=False
+):
+    """RESET: [CmdType.RESET] — clear a latched protective stop, re-enabling motion."""
+
+    pass
+
+
+class EstopCmd(
+    msgspec.Struct, tag=int(CmdType.ESTOP), array_like=True, frozen=True, gc=False
+):
+    """ESTOP: [CmdType.ESTOP] — protective stop: stop all motion and latch disabled until RESET."""
+
+    pass
+
+
+class StopCmd(
+    msgspec.Struct, tag=int(CmdType.STOP), array_like=True, frozen=True, gc=False
+):
+    """STOP: [CmdType.STOP] — cancel active motion and queue; controller stays enabled."""
+
+    pass
+
+
+class ResetStateCmd(
+    msgspec.Struct, tag=int(CmdType.RESET_STATE), array_like=True, frozen=True, gc=False
+):
+    """RESET_STATE: [CmdType.RESET_STATE] — reset controller state (shapes, tool, errors)."""
+
+    pass
+
+
+class ResetLoopStatsCmd(
+    msgspec.Struct,
+    tag=int(CmdType.RESET_LOOP_STATS),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """RESET_LOOP_STATS: [CmdType.RESET_LOOP_STATS]
+
+    Reset timing statistics (min/max/overrun counts) without affecting controller state.
+    """
+
+    pass
+
+
+class TeleportCmd(
+    msgspec.Struct, tag=int(CmdType.TELEPORT), array_like=True, frozen=True, gc=False
+):
+    """TELEPORT: instantly set joint angles in degrees (simulator only)."""
+
+    angles: Annotated[list[float], msgspec.Meta(min_length=6, max_length=6)]
+    tool_positions: list[float] | None = None
+
+
+class WriteIOCmd(
+    msgspec.Struct, tag=int(CmdType.WRITE_IO), array_like=True, frozen=True, gc=False
+):
+    """WRITE_IO: [CmdType.WRITE_IO, port_index, value]
+
+    port_index: 0-7 (8-bit I/O port)
+    value: 0 or 1
+    """
+
+    port_index: Annotated[int, msgspec.Meta(ge=0, le=7)]
+    value: Annotated[int, msgspec.Meta(ge=0, le=1)]
+
+
+class ConnectHardwareCmd(
+    msgspec.Struct,
+    tag=int(CmdType.CONNECT_HARDWARE),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """CONNECT_HARDWARE: [CmdType.CONNECT_HARDWARE, port_str]"""
+
+    port_str: Annotated[str, msgspec.Meta(min_length=1, max_length=256)]
+
+
+class SimulatorCmd(
+    msgspec.Struct, tag=int(CmdType.SIMULATOR), array_like=True, frozen=True, gc=False
+):
+    """SIMULATOR: [CmdType.SIMULATOR, on]"""
+
+    on: bool
+
+
+class DelayCmd(
+    msgspec.Struct, tag=int(CmdType.DELAY), array_like=True, frozen=True, gc=False
+):
+    """DELAY: [CmdType.DELAY, seconds]"""
+
+    seconds: Annotated[float, msgspec.Meta(gt=0.0)]
+
+
+class SelectToolCmd(
+    msgspec.Struct, tag=int(CmdType.SELECT_TOOL), array_like=True, frozen=True, gc=False
+):
+    """SELECT_TOOL: [CmdType.SELECT_TOOL, tool_name, variant_key]"""
+
+    tool_name: Annotated[str, msgspec.Meta(min_length=1, max_length=64)]
+    variant_key: str = ""
+
+    def __post_init__(self) -> None:
+        name = self.tool_name.strip().upper()
+        if name not in get_registry():
+            raise ValueError(f"Unknown tool '{name}'. Available: {list_tools()}")
+
+
+class SetTcpOffsetCmd(
+    msgspec.Struct,
+    tag=int(CmdType.SET_TCP_OFFSET),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """SET_TCP_OFFSET: offset the effective TCP in the tool's local frame (mm)."""
+
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+
+
+class ShapeWire(msgspec.Struct, array_like=True, frozen=True, gc=False):
+    """One workspace shape — mirrors waldoctl ``Shape.to_wire()``."""
+
+    kind: str
+    params: list[float]
+    pose: list[float]
+    collision: bool
+    margin: float | None
+    name: str
+
+
+class SetShapesCmd(
+    msgspec.Struct,
+    tag=int(CmdType.SET_SHAPES),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """SET_SHAPES: replace the workspace collision-world shapes."""
+
+    shapes: list[ShapeWire]
+
+
+class SelectProfileCmd(
+    msgspec.Struct,
+    tag=int(CmdType.SELECT_PROFILE),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """SELECT_PROFILE: [CmdType.SELECT_PROFILE, profile]"""
+
+    profile: Annotated[str, msgspec.Meta(min_length=1, max_length=32)]
+
+
+class SetJ1HomeModeCmd(
+    msgspec.Struct,
+    tag=int(CmdType.SET_J1_HOME_MODE),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """SET_J1_HOME_MODE: MANUAL or AUTO for the owner-configured base axis."""
+
+    mode: Annotated[str, msgspec.Meta(pattern=r"^(MANUAL|AUTO)$")]
+
+
+class ToolActionCmd(
+    msgspec.Struct,
+    tag=int(CmdType.TOOL_ACTION),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """TOOL_ACTION: [CmdType.TOOL_ACTION, tool_key, action, params]
+
+    Generic tool action command.  The controller validates *tool_key*
+    against the registry and delegates to the appropriate 100 Hz command.
+    """
+
+    tool_key: Annotated[str, msgspec.Meta(min_length=1, max_length=64)]
+    action: Annotated[str, msgspec.Meta(min_length=1, max_length=64)]
+    params: list = []
+
+    def __post_init__(self) -> None:
+        key = self.tool_key.strip().upper()
+        registry = get_registry()
+        if key not in registry:
+            raise ValueError(f"Unknown tool '{key}'. Available: {list(registry)}")
+
+
+class ToolStatusCmd(
+    msgspec.Struct,
+    tag=int(CmdType.TOOL_STATUS),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """TOOL_STATUS: [CmdType.TOOL_STATUS]"""
+
+    pass
+
+
+class IsSimulatorCmd(
+    msgspec.Struct,
+    tag=int(CmdType.IS_SIMULATOR),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """IS_SIMULATOR: query whether the controller is in simulator mode."""
+
+    pass
+
+
+class ReachableCmd(
+    msgspec.Struct,
+    tag=int(CmdType.REACHABLE),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """REACHABLE: [CmdType.REACHABLE]"""
+
+    pass
+
+
+class ErrorCmd(
+    msgspec.Struct,
+    tag=int(CmdType.ERROR),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """ERROR: [CmdType.ERROR]"""
+
+    pass
+
+
+class TcpSpeedCmd(
+    msgspec.Struct,
+    tag=int(CmdType.TCP_SPEED),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """TCP_SPEED: [CmdType.TCP_SPEED]"""
+
+    pass
+
+
+class TcpOffsetCmd(
+    msgspec.Struct,
+    tag=int(CmdType.TCP_OFFSET),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """TCP_OFFSET: query current TCP offset."""
+
+    pass
+
+
+class ShapesCmd(
+    msgspec.Struct,
+    tag=int(CmdType.SHAPES),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """SHAPES: query the applied collision world (readback)."""
+
+    pass
+
+
+# Query commands (no params, just the tag)
+class PingCmd(
+    msgspec.Struct, tag=int(CmdType.PING), array_like=True, frozen=True, gc=False
+):
+    """PING: [CmdType.PING]"""
+
+    pass
+
+
+class StatusCmd(
+    msgspec.Struct, tag=int(CmdType.STATUS), array_like=True, frozen=True, gc=False
+):
+    """STATUS: [CmdType.STATUS]"""
+
+    pass
+
+
+class AnglesCmd(
+    msgspec.Struct, tag=int(CmdType.ANGLES), array_like=True, frozen=True, gc=False
+):
+    """ANGLES: [CmdType.ANGLES]"""
+
+    pass
+
+
+class PoseCmd(
+    msgspec.Struct, tag=int(CmdType.POSE), array_like=True, frozen=True, gc=False
+):
+    """POSE: [CmdType.POSE, frame]"""
+
+    frame: Annotated[str, msgspec.Meta(pattern=r"^(WRF|TRF)$")] | None = None
+
+
+class IOCmd(
+    msgspec.Struct, tag=int(CmdType.IO), array_like=True, frozen=True, gc=False
+):
+    """IO: [CmdType.IO]"""
+
+    pass
+
+
+class JointSpeedsCmd(
+    msgspec.Struct,
+    tag=int(CmdType.JOINT_SPEEDS),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """JOINT_SPEEDS: [CmdType.JOINT_SPEEDS]"""
+
+    pass
+
+
+class ToolsCmd(
+    msgspec.Struct, tag=int(CmdType.TOOLS), array_like=True, frozen=True, gc=False
+):
+    """TOOLS: [CmdType.TOOLS]"""
+
+    pass
+
+
+class QueueCmd(
+    msgspec.Struct, tag=int(CmdType.QUEUE), array_like=True, frozen=True, gc=False
+):
+    """QUEUE: [CmdType.QUEUE]"""
+
+    pass
+
+
+class ActivityCmd(
+    msgspec.Struct,
+    tag=int(CmdType.ACTIVITY),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """ACTIVITY: [CmdType.ACTIVITY]"""
+
+    pass
+
+
+class LoopStatsCmd(
+    msgspec.Struct,
+    tag=int(CmdType.LOOP_STATS),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """LOOP_STATS: [CmdType.LOOP_STATS]"""
+
+    pass
+
+
+class ProfileCmd(
+    msgspec.Struct, tag=int(CmdType.PROFILE), array_like=True, frozen=True, gc=False
+):
+    """PROFILE: [CmdType.PROFILE]"""
+
+    pass
+
+
+# =============================================================================
+# Auto-generated Command union and STRUCT_TO_CMDTYPE
+# =============================================================================
+
+
+def _collect_command_structs() -> list[type]:
+    """Collect all command struct classes from this module."""
+    import sys
+
+    module = sys.modules[__name__]
+    structs = []
+    for name, cls in vars(module).items():
+        if not name.endswith("Cmd"):
+            continue
+        if not isinstance(cls, type):
+            continue
+        if not issubclass(cls, msgspec.Struct):
+            continue
+        config = getattr(cls, "__struct_config__", None)
+        if config is not None and config.tag is not None:
+            structs.append(cls)
+    return structs
+
+
+def _build_struct_to_cmdtype(structs: list[type]) -> dict[type, CmdType]:
+    """Auto-generate struct -> CmdType mapping from tagged structs."""
+    mapping: dict[type, CmdType] = {}
+    for struct_cls in structs:
+        config = getattr(struct_cls, "__struct_config__", None)
+        if config is None:
+            continue
+        tag = getattr(config, "tag", None)
+        if tag is None:
+            continue
+        try:
+            cmd_type = CmdType(tag)
+            mapping[struct_cls] = cmd_type
+        except ValueError:
+            pass  # Not a valid CmdType tag
+    return mapping
+
+
+# Build at import time
+_COMMAND_STRUCTS = _collect_command_structs()
+STRUCT_TO_CMDTYPE: dict[type, CmdType] = _build_struct_to_cmdtype(_COMMAND_STRUCTS)
+
+# Build Command union dynamically from collected structs
+Command: TypeAlias = Union[tuple(_COMMAND_STRUCTS)]
+
+# Module-level decoder for single-pass command decode
+_command_decoder = msgspec.msgpack.Decoder(Command)
+
+
+def decode_command(data: bytes) -> Command:
+    """Decode raw bytes to typed command struct.
+
+    Args:
+        data: Raw msgpack-encoded command bytes
+
+    Returns:
+        Typed command struct
+
+    Raises:
+        msgspec.ValidationError: If data is invalid or doesn't match any command type
+    """
+    return _command_decoder.decode(data)
+
+
+def encode_command(cmd: Command) -> bytes:
+    """Encode a typed command struct to bytes.
+
+    Args:
+        cmd: Typed command struct
+
+    Returns:
+        Raw msgpack-encoded bytes
+    """
+    return _encoder.encode(cmd)
+
+
+def encode_command_into(cmd: Command, buf: bytearray) -> bytearray:
+    """Encode a typed command struct into a pre-allocated bytearray.
+
+    The buffer is resized to exactly fit the encoded output.
+    Reuses the same bytearray object across calls to avoid per-send
+    ``bytes`` allocations on fire-and-forget paths.
+
+    Args:
+        cmd: Typed command struct
+        buf: Pre-allocated bytearray (will be resized in-place)
+
+    Returns:
+        The same *buf* object, now containing the encoded bytes.
+    """
+    _encoder.encode_into(cmd, buf)
+    return buf
+
+
+# =============================================================================
+# Response Structs - Tagged Union for single-pass decode
+# Wire format: [MsgType.RESPONSE, QueryType.XXX, ...fields]
+# =============================================================================
+
+
+class StatusResultStruct(
+    msgspec.Struct, tag=int(QueryType.STATUS), array_like=True, frozen=True, gc=False
+):
+    """Aggregate robot status."""
+
+    pose: list[float]
+    angles: list[float]
+    speeds: list[float]
+    io: list[int]
+    tool_status: list
+
+
+class LoopStatsResultStruct(
+    msgspec.Struct,
+    tag=int(QueryType.LOOP_STATS),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """Control loop runtime metrics."""
+
+    target_hz: float
+    loop_count: int
+    overrun_count: int
+    mean_period_s: float
+    std_period_s: float
+    min_period_s: float
+    max_period_s: float
+    p95_period_s: float
+    p99_period_s: float
+    mean_hz: float
+
+
+class ToolResultStruct(
+    msgspec.Struct, tag=int(QueryType.TOOL), array_like=True, frozen=True, gc=False
+):
+    """Tool configuration."""
+
+    tool: str
+    available: list[str]
+
+
+class CurrentActionResultStruct(
+    msgspec.Struct,
+    tag=int(QueryType.CURRENT_ACTION),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """Current executing action."""
+
+    current: str
+    state: str
+    next: str
+    params: str = ""
+
+
+class PingResultStruct(
+    msgspec.Struct, tag=int(QueryType.PING), array_like=True, frozen=True, gc=False
+):
+    """Ping response with hardware connectivity status."""
+
+    hardware_connected: int  # 0 or 1
+
+
+class AnglesResultStruct(
+    msgspec.Struct, tag=int(QueryType.ANGLES), array_like=True, frozen=True, gc=False
+):
+    """Joint angles response."""
+
+    angles: list[float]
+
+
+class PoseResultStruct(
+    msgspec.Struct, tag=int(QueryType.POSE), array_like=True, frozen=True, gc=False
+):
+    """Pose response."""
+
+    pose: list[float]
+
+
+class IOResultStruct(
+    msgspec.Struct, tag=int(QueryType.IO), array_like=True, frozen=True, gc=False
+):
+    """I/O status response."""
+
+    io: list[int]
+
+
+class SpeedsResultStruct(
+    msgspec.Struct, tag=int(QueryType.SPEEDS), array_like=True, frozen=True, gc=False
+):
+    """Speeds response."""
+
+    speeds: list[float]
+
+
+class ProfileResultStruct(
+    msgspec.Struct, tag=int(QueryType.PROFILE), array_like=True, frozen=True, gc=False
+):
+    """Motion profile response."""
+
+    profile: str
+
+
+class QueueResultStruct(
+    msgspec.Struct, tag=int(QueryType.QUEUE), array_like=True, frozen=True, gc=False
+):
+    """Queue status response with progress tracking."""
+
+    queue: list
+    executing_index: int = -1
+    completed_index: int = -1
+    last_checkpoint: str = ""
+    queued_duration: float = 0.0
+
+
+class ToolStatusResultStruct(
+    msgspec.Struct,
+    tag=int(QueryType.TOOL_STATUS),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """Tool status response — full 7-field ToolStatus."""
+
+    tool_key: str
+    state: ToolState
+    engaged: bool
+    part_detected: bool
+    fault_code: int
+    positions: list[float]
+    channels: list[float]
+
+
+class EnablementResultStruct(
+    msgspec.Struct,
+    tag=int(QueryType.ENABLEMENT),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """Joint and Cartesian enablement flags."""
+
+    joint_en: list[int]
+    cart_en_wrf: list[int]
+    cart_en_trf: list[int]
+
+
+class ErrorResultStruct(
+    msgspec.Struct,
+    tag=int(QueryType.ERROR),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """Current error state (None-safe wire representation)."""
+
+    error: list | None
+
+
+class TcpSpeedResultStruct(
+    msgspec.Struct,
+    tag=int(QueryType.TCP_SPEED),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """TCP linear speed in mm/s."""
+
+    speed: float
+
+
+class IsSimulatorResultStruct(
+    msgspec.Struct,
+    tag=int(QueryType.IS_SIMULATOR),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """Simulator mode state."""
+
+    active: bool
+
+
+class TcpOffsetResultStruct(
+    msgspec.Struct,
+    tag=int(QueryType.TCP_OFFSET),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """Current TCP offset in mm (tool-local frame)."""
+
+    x: float
+    y: float
+    z: float
+
+
+class ShapesResultStruct(
+    msgspec.Struct,
+    tag=int(QueryType.SHAPES),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """The applied collision world by layer, plus the epoch it represents."""
+
+    installation: list[ShapeWire]
+    program: list[ShapeWire]
+    epoch: int
+
+
+# Tagged Union for responses
+Response = (
+    StatusResultStruct
+    | LoopStatsResultStruct
+    | ToolResultStruct
+    | CurrentActionResultStruct
+    | PingResultStruct
+    | AnglesResultStruct
+    | PoseResultStruct
+    | IOResultStruct
+    | SpeedsResultStruct
+    | ProfileResultStruct
+    | QueueResultStruct
+    | ToolStatusResultStruct
+    | EnablementResultStruct
+    | ErrorResultStruct
+    | TcpSpeedResultStruct
+    | IsSimulatorResultStruct
+    | TcpOffsetResultStruct
+    | ShapesResultStruct
+)
+
+
+# Typed message classes for parsed responses
+
+
+class OkMsg(
+    msgspec.Struct,
+    tag=int(MsgType.OK),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """OK response, optionally carrying a command index for queued commands."""
+
+    index: int | None = None
+
+
+class ErrorMsg(
+    msgspec.Struct,
+    tag=int(MsgType.ERROR),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """Error response carrying a RobotError wire representation."""
+
+    message: list
+
+
+class ResponseMsg(
+    msgspec.Struct,
+    tag=int(MsgType.RESPONSE),
+    array_like=True,
+    frozen=True,
+    gc=False,
+):
+    """Query response carrying a typed result struct."""
+
+    result: Response
+
+
+# Tagged union for single-pass decode of server replies
+Message: TypeAlias = Union[OkMsg, ErrorMsg, ResponseMsg]
+_message_decoder = msgspec.msgpack.Decoder(Message)
+
+
+def decode_message(data: bytes) -> Message:
+    """Decode raw msgpack bytes into a typed Message.
+
+    Raises:
+        msgspec.ValidationError: If data doesn't match any message type.
+    """
+    return _message_decoder.decode(data)
+
+
+# =============================================================================
+# Generic msgpack encode/decode functions
+# =============================================================================
+
+
+def encode(obj: object) -> bytes:
+    """Encode any msgspec struct or Python object to bytes with numpy support."""
+    return _encoder.encode(obj)
+
+
+def decode(data: bytes) -> object:
+    """Decode msgpack bytes to a Python object."""
+    return _decoder.decode(data)
+
+
+# Pre-packed common responses (avoid repeated packing)
+OK_PACKED = _encoder.encode(OkMsg())
+
+# Cache for common error responses (3x faster for repeated errors)
+_UNKNOWN_CMD_ERROR = make_error(ErrorCode.COMM_UNKNOWN_COMMAND)
+_QUEUE_FULL_ERROR = make_error(ErrorCode.COMM_QUEUE_FULL)
+_ERROR_CACHE: dict[int, bytes] = {
+    ErrorCode.COMM_UNKNOWN_COMMAND: _encoder.encode(
+        ErrorMsg(_UNKNOWN_CMD_ERROR.to_wire())
+    ),
+    ErrorCode.COMM_QUEUE_FULL: _encoder.encode(ErrorMsg(_QUEUE_FULL_ERROR.to_wire())),
+}
+
+
+def pack_ok() -> bytes:
+    """Pack an OK response (no command index)."""
+    return OK_PACKED
+
+
+def pack_ok_index(index: int) -> bytes:
+    """Pack an OK response with a command index for queued commands."""
+    return _encoder.encode(OkMsg(index=index))
+
+
+def pack_error(error: RobotError) -> bytes:
+    """Pack an error response: [ERROR, [command_index, code, title, cause, effect, remedy]].
+
+    Common errors are cached by ErrorCode for performance.
+    """
+    cached = _ERROR_CACHE.get(error.code)
+    if cached is not None:
+        return cached
+    return _encoder.encode(ErrorMsg(error.to_wire()))
+
+
+def pack_response(result: Response) -> bytes:
+    """Pack a query response: [RESPONSE, [query_type_tag, ...fields]]."""
+    return _encoder.encode(ResponseMsg(result))
+
+
+def pack_status(
+    pose: np.ndarray,
+    angles: np.ndarray,
+    speeds: np.ndarray,
+    io: np.ndarray,
+    action_current: str,
+    action_state: ActionState,
+    joint_en: np.ndarray,
+    cart_en_wrf: np.ndarray,
+    cart_en_trf: np.ndarray,
+    executing_index: int = -1,
+    completed_index: int = -1,
+    last_checkpoint: str = "",
+    error: RobotError | None = None,
+    queued_segments: int = 0,
+    queued_duration: float = 0.0,
+    action_params: str = "",
+    tool_status: ToolStatus | None = None,
+    tcp_speed: float = 0.0,
+    simulator_active: bool = False,
+    collision_active: bool = False,
+    collision_pairs: tuple[tuple[str, str], ...] = (),
+    scene_epoch: int = 0,
+    accepted_index: int = -1,
+    homed: bool = True,
+) -> bytes:
+    """Pack a status broadcast message.
+
+    Uses ormsgpack with OPT_SERIALIZE_NUMPY for ~80x fewer allocations
+    compared to msgspec with enc_hook (reads numpy buffers directly via C API).
+    """
+    ts = tool_status
+    return ormsgpack.packb(
+        (
+            MsgType.STATUS,
+            pose,
+            angles,
+            speeds,
+            io,
+            action_current,
+            action_state,
+            joint_en,
+            cart_en_wrf,
+            cart_en_trf,
+            executing_index,
+            completed_index,
+            last_checkpoint,
+            error.to_wire() if error is not None else None,
+            queued_segments,
+            queued_duration,
+            action_params,
+            (
+                ts.key,
+                ts.state,
+                ts.engaged,
+                ts.part_detected,
+                ts.fault_code,
+                ts.positions,
+                ts.channels,
+            )
+            if ts is not None
+            else None,
+            tcp_speed,
+            simulator_active,
+            collision_active,
+            collision_pairs,
+            scene_epoch,
+            accepted_index,
+            homed,
+        ),
+        option=ormsgpack.OPT_SERIALIZE_NUMPY,
+    )
+
+
+# =============================================================================
+# Status Buffer (for zero-allocation status parsing)
+# =============================================================================
+
+
+@dataclass
+class StatusBuffer:
+    """Preallocated buffer for zero-allocation status parsing.
+
+    All numeric arrays are numpy for cache-friendly access and potential numba use.
+    Use decode_status_bin_into() to fill this buffer without allocating new objects.
+    """
+
+    pose: np.ndarray = field(default_factory=lambda: np.zeros(16, dtype=np.float64))
+    angles: np.ndarray = field(default_factory=lambda: np.zeros(6, dtype=np.float64))
+    speeds: np.ndarray = field(default_factory=lambda: np.zeros(6, dtype=np.float64))
+    io: np.ndarray = field(default_factory=lambda: np.zeros(5, dtype=np.int32))
+    tool_status: ToolStatus = field(default_factory=ToolStatus)
+    joint_en: np.ndarray = field(default_factory=lambda: np.ones(12, dtype=np.int32))
+    cart_en_wrf: np.ndarray = field(default_factory=lambda: np.ones(12, dtype=np.int32))
+    cart_en_trf: np.ndarray = field(default_factory=lambda: np.ones(12, dtype=np.int32))
+    action_current: str = ""
+    action_params: str = ""
+    action_state: ActionState = ActionState.IDLE
+    executing_index: int = -1
+    completed_index: int = -1
+    last_checkpoint: str = ""
+    error: RobotError | None = None
+    queued_segments: int = 0
+    queued_duration: float = 0.0
+    tcp_speed: float = 0.0
+    simulator_active: bool = False
+    collision_active: bool = False
+    collision_pairs: list[tuple[str, str]] = field(default_factory=list)
+    scene_epoch: int = 0
+    # Last command index the server accepted; -1 from producers that predate
+    # the field. Lets waiters order a standing error against their own
+    # command's acceptance (acceptance clears stale errors server-side).
+    accepted_index: int = -1
+    # All joints homed. True from producers that predate the field (permissive:
+    # old servers gate nothing, so claiming unhomed would be a false alarm).
+    homed: bool = True
+    # Built once in __post_init__, aliasing the two enable arrays the decoder
+    # mutates in place.
+    cart_en: dict[str, np.ndarray] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self.cart_en = {
+            "WRF": self.cart_en_wrf,
+            "TRF": self.cart_en_trf,
+        }
+
+    def copy(self) -> "StatusBuffer":
+        """Return a deep copy with all arrays copied."""
+        ts = self.tool_status
+        return StatusBuffer(
+            pose=self.pose.copy(),
+            angles=self.angles.copy(),
+            speeds=self.speeds.copy(),
+            io=self.io.copy(),
+            tool_status=ToolStatus(
+                key=ts.key,
+                state=ts.state,
+                engaged=ts.engaged,
+                part_detected=ts.part_detected,
+                fault_code=ts.fault_code,
+                positions=ts.positions,
+                channels=ts.channels,
+            ),
+            joint_en=self.joint_en.copy(),
+            cart_en_wrf=self.cart_en_wrf.copy(),
+            cart_en_trf=self.cart_en_trf.copy(),
+            action_current=self.action_current,
+            action_params=self.action_params,
+            action_state=self.action_state,
+            executing_index=self.executing_index,
+            completed_index=self.completed_index,
+            last_checkpoint=self.last_checkpoint,
+            error=self.error,
+            queued_segments=self.queued_segments,
+            queued_duration=self.queued_duration,
+            tcp_speed=self.tcp_speed,
+            simulator_active=self.simulator_active,
+            collision_active=self.collision_active,
+            collision_pairs=list(self.collision_pairs),
+            scene_epoch=self.scene_epoch,
+            accepted_index=self.accepted_index,
+            homed=self.homed,
+        )
+
+
+def decode_status_bin_into(data: bytes, buf: StatusBuffer) -> bool:
+    """Zero-allocation decode of STATUS message into preallocated buffer.
+
+    Message format: [MsgType.STATUS, pose, angles, speeds, io,
+                     action_current, action_state, joint_en, cart_en_wrf, cart_en_trf,
+                     executing_index, completed_index, last_checkpoint,
+                     error, queued_segments, queued_duration, action_params,
+                     tool_status_tuple, tcp_speed, simulator_active,
+                     collision_active, collision_pairs, scene_epoch,
+                     accepted_index, homed]
+
+    Args:
+        data: Raw msgpack bytes
+        buf: Preallocated StatusBuffer to fill
+
+    Returns:
+        True if valid STATUS message, False otherwise.
+    """
+    try:
+        msg = _decoder.decode(data)
+        if (
+            not isinstance(msg, (list, tuple))
+            or len(msg) < 17
+            or msg[0] != MsgType.STATUS
+        ):
+            return False
+
+        buf.pose[:] = msg[1]
+        buf.angles[:] = msg[2]
+        buf.speeds[:] = msg[3]
+        buf.io[:] = msg[4]
+        buf.action_current = msg[5]
+        buf.action_state = ActionState(msg[6])
+        buf.joint_en[:] = msg[7]
+        buf.cart_en_wrf[:] = msg[8]
+        buf.cart_en_trf[:] = msg[9]
+        buf.executing_index = msg[10]
+        buf.completed_index = msg[11]
+        buf.last_checkpoint = msg[12]
+        raw_error = msg[13]
+        buf.error = RobotError.from_wire(raw_error) if raw_error is not None else None
+        buf.queued_segments = msg[14]
+        buf.queued_duration = msg[15]
+        buf.action_params = msg[16]
+
+        raw_ts = msg[17] if len(msg) > 17 else None
+        ts = buf.tool_status
+        if (
+            raw_ts is not None
+            and isinstance(raw_ts, (list, tuple))
+            and len(raw_ts) >= 7
+        ):
+            ts.key = raw_ts[0]
+            ts.state = ToolState(raw_ts[1])
+            ts.engaged = raw_ts[2]
+            ts.part_detected = raw_ts[3]
+            ts.fault_code = raw_ts[4]
+            ts.positions = tuple(raw_ts[5]) if raw_ts[5] else ()
+            ts.channels = tuple(raw_ts[6]) if raw_ts[6] else ()
+
+        if len(msg) > 18:
+            buf.tcp_speed = float(msg[18])
+
+        if len(msg) > 19:
+            buf.simulator_active = bool(msg[19])
+
+        # Collision viz (appended after simulator_active; len-guarded for
+        # backward-compat with pre-collision status producers).
+        if len(msg) > 20:
+            buf.collision_active = bool(msg[20])
+        if len(msg) > 21:
+            raw_pairs = msg[21]
+            cp = buf.collision_pairs
+            cp.clear()
+            if raw_pairs:
+                for p in raw_pairs:
+                    cp.append((p[0], p[1]))
+        if len(msg) > 22:
+            buf.scene_epoch = int(msg[22])
+        buf.accepted_index = int(msg[23]) if len(msg) > 23 else -1
+        buf.homed = bool(msg[24]) if len(msg) > 24 else True
+
+        return True
+    except Exception as e:
+        logger.debug("decode_status_bin_into: %s", e)
+        return False
+
+
+# =============================================================================
+# Binary serial frame packing/unpacking (firmware communication)
+# =============================================================================
+
+
+class CommandCode(IntEnum):
+    """Unified command codes for firmware interface."""
+
+    HOME = 100
+    ENABLE = 101
+    DISABLE = 102
+    JOG = 123
+    MOVE = 156
+    TELEPORT = 200
+    IDLE = 255
+
+
+START = b"\xff\xff\xff"
+END = b"\x01\x02"
+PAYLOAD_LEN = 52  # matches existing firmware expectation
+
+
+@njit(cache=True)
+def split_to_3_bytes(n: int) -> tuple[int, int, int]:
+    """
+    Convert int to signed 24-bit big-endian (two's complement) encoded bytes (b0,b1,b2).
+    """
+    n24 = n & 0xFFFFFF
+    return ((n24 >> 16) & 0xFF, (n24 >> 8) & 0xFF, n24 & 0xFF)
+
+
+@njit(cache=True)
+def fuse_3_bytes(b0: int, b1: int, b2: int) -> int:
+    """
+    Convert 3 bytes (big-endian) into a signed 24-bit integer.
+    """
+    val = (b0 << 16) | (b1 << 8) | b2
+    return val - 0x1000000 if (val & 0x800000) else val
+
+
+@njit(cache=True)
+def fuse_2_bytes(b0: int, b1: int) -> int:
+    """
+    Convert 2 bytes (big-endian) into a signed 16-bit integer.
+    """
+    val = (b0 << 8) | b1
+    return val - 0x10000 if (val & 0x8000) else val
+
+
+@njit(cache=True)
+def _pack_positions(
+    out: np.ndarray | memoryview, values: np.ndarray, offset: int
+) -> None:
+    for i in range(6):
+        v = int(values[i]) & 0xFFFFFF
+        j = offset + i * 3
+        out[j] = (v >> 16) & 0xFF
+        out[j + 1] = (v >> 8) & 0xFF
+        out[j + 2] = v & 0xFF
+
+
+@njit(cache=True)
+def _unpack_positions(data: np.ndarray | memoryview, out: np.ndarray) -> None:
+    for i in range(6):
+        j = i * 3
+        val = (int(data[j]) << 16) | (int(data[j + 1]) << 8) | int(data[j + 2])
+        if val >= 0x800000:
+            val -= 0x1000000
+        out[i] = val
+
+
+@njit(cache=True)
+def _pack_bitfield(arr: np.ndarray) -> int:
+    """Pack 8-element array into a single byte (MSB first)."""
+    return (
+        (int(arr[0] != 0) << 7)
+        | (int(arr[1] != 0) << 6)
+        | (int(arr[2] != 0) << 5)
+        | (int(arr[3] != 0) << 4)
+        | (int(arr[4] != 0) << 3)
+        | (int(arr[5] != 0) << 2)
+        | (int(arr[6] != 0) << 1)
+        | int(arr[7] != 0)
+    )
+
+
+@njit(cache=True)
+def _unpack_bitfield(byte_val: int, out: np.ndarray) -> None:
+    """Unpack a byte into 8 bits (MSB first) into output array."""
+    out[0] = (byte_val >> 7) & 1
+    out[1] = (byte_val >> 6) & 1
+    out[2] = (byte_val >> 5) & 1
+    out[3] = (byte_val >> 4) & 1
+    out[4] = (byte_val >> 3) & 1
+    out[5] = (byte_val >> 2) & 1
+    out[6] = (byte_val >> 1) & 1
+    out[7] = byte_val & 1
+
+
+@njit(cache=True)
+def pack_tx_frame_into(
+    out: memoryview,
+    position_out: np.ndarray,
+    speed_out: np.ndarray,
+    command_code: int,
+    affected_joint_out: np.ndarray,
+    inout_out: np.ndarray,
+    timeout_out: int,
+    gripper_data_out: np.ndarray,
+) -> None:
+    """
+    Pack a full TX frame into the provided memoryview without allocations.
+
+    Expects 'out' to be a writable buffer of length >= 56 bytes.
+    """
+    # Header: 0xFF 0xFF 0xFF + payload length
+    out[0] = 0xFF
+    out[1] = 0xFF
+    out[2] = 0xFF
+    out[3] = 52
+
+    # Positions and speeds packed via JIT-compiled helper
+    _pack_positions(out, position_out, 4)
+    _pack_positions(out, speed_out, 22)
+
+    out[40] = command_code
+
+    out[41] = _pack_bitfield(affected_joint_out)
+    out[42] = _pack_bitfield(inout_out)
+
+    out[43] = int(timeout_out) & 0xFF
+
+    # Gripper: position, speed, current as 2 bytes each (big-endian)
+    g0 = int(gripper_data_out[0]) & 0xFFFF
+    g1 = int(gripper_data_out[1]) & 0xFFFF
+    g2 = int(gripper_data_out[2]) & 0xFFFF
+    out[44] = (g0 >> 8) & 0xFF
+    out[45] = g0 & 0xFF
+    out[46] = (g1 >> 8) & 0xFF
+    out[47] = g1 & 0xFF
+    out[48] = (g2 >> 8) & 0xFF
+    out[49] = g2 & 0xFF
+
+    # Gripper command, mode, id
+    out[50] = int(gripper_data_out[3]) & 0xFF
+    out[51] = int(gripper_data_out[4]) & 0xFF
+    out[52] = int(gripper_data_out[5]) & 0xFF
+
+    # CRC placeholder byte (0xE4) — fixed value, not computed
+    out[53] = 228
+
+    out[54] = 0x01
+    out[55] = 0x02
+
+
+@njit(cache=True)
+def unpack_rx_frame_into(
+    data: memoryview,
+    pos_out: np.ndarray,
+    spd_out: np.ndarray,
+    homed_out: np.ndarray,
+    io_out: np.ndarray,
+    temp_out: np.ndarray,
+    poserr_out: np.ndarray,
+    timing_out: np.ndarray,
+    grip_out: np.ndarray,
+) -> bool:
+    """
+    Zero-allocation decode of a 52-byte RX frame payload (memoryview) directly into numpy arrays.
+    Expects:
+      - pos_out, spd_out: shape (6,), dtype=int32
+      - homed_out, io_out, temp_out, poserr_out: shape (8,), dtype=uint8
+      - timing_out: shape (1,), dtype=int32
+      - grip_out: shape (6,), dtype=int32 [device_id, pos, spd, cur, status, obj]
+    """
+    if len(data) < 52:
+        return False
+
+    _unpack_positions(data, pos_out)
+    _unpack_positions(data[18:], spd_out)
+
+    _unpack_bitfield(int(data[36]), homed_out)
+    _unpack_bitfield(int(data[37]), io_out)
+    _unpack_bitfield(int(data[38]), temp_out)
+    _unpack_bitfield(int(data[39]), poserr_out)
+
+    timing_out[0] = fuse_3_bytes(0, int(data[40]), int(data[41]))
+
+    device_id = int(data[44])
+    grip_pos = fuse_2_bytes(int(data[45]), int(data[46]))
+    grip_spd = fuse_2_bytes(int(data[47]), int(data[48]))
+    grip_cur = fuse_2_bytes(int(data[49]), int(data[50]))
+    status_byte = int(data[51])
+
+    obj_detection = ((status_byte >> 3) & 1) << 1 | ((status_byte >> 2) & 1)
+
+    grip_out[0] = device_id
+    grip_out[1] = grip_pos
+    grip_out[2] = grip_spd
+    grip_out[3] = grip_cur
+    grip_out[4] = status_byte
+    grip_out[5] = obj_detection
+
+    return True
+
+
+# =============================================================================
+# Module exports
+# =============================================================================
+
+__all__ = [
+    # Enums
+    "MsgType",
+    "QueryType",
+    "CmdType",
+    "CommandCode",
+    # Command structs — motion (queued)
+    "MoveJCmd",
+    "MoveJPoseCmd",
+    "MoveLCmd",
+    "MoveCCmd",
+    "MoveSCmd",
+    "MovePCmd",
+    "HomeCmd",
+    "CheckpointCmd",
+    # Command structs — streaming (servo/jog)
+    "ServoJCmd",
+    "ServoJPoseCmd",
+    "ServoLCmd",
+    "JogJCmd",
+    "JogLCmd",
+    # Command structs — system/control
+    "ResetCmd",
+    "EstopCmd",
+    "StopCmd",
+    "ResetStateCmd",
+    "ResetLoopStatsCmd",
+    "WriteIOCmd",
+    "ConnectHardwareCmd",
+    "SimulatorCmd",
+    "DelayCmd",
+    "TeleportCmd",
+    "SelectToolCmd",
+    "SetTcpOffsetCmd",
+    "SelectProfileCmd",
+    "SetJ1HomeModeCmd",
+    "ToolActionCmd",
+    # Command structs — query
+    "ToolStatusCmd",
+    "IsSimulatorCmd",
+    "ReachableCmd",
+    "ErrorCmd",
+    "TcpSpeedCmd",
+    "TcpOffsetCmd",
+    "ShapesCmd",
+    "PingCmd",
+    "StatusCmd",
+    "AnglesCmd",
+    "PoseCmd",
+    "IOCmd",
+    "JointSpeedsCmd",
+    "ToolsCmd",
+    "QueueCmd",
+    "ActivityCmd",
+    "LoopStatsCmd",
+    "ProfileCmd",
+    "Command",
+    # Mixin
+    "MotionParamsMixin",
+    # Response structs
+    "StatusResultStruct",
+    "LoopStatsResultStruct",
+    "ToolResultStruct",
+    "CurrentActionResultStruct",
+    "PingResultStruct",
+    "AnglesResultStruct",
+    "PoseResultStruct",
+    "IOResultStruct",
+    "SpeedsResultStruct",
+    "ProfileResultStruct",
+    "QueueResultStruct",
+    "ToolStatusResultStruct",
+    "EnablementResultStruct",
+    "ErrorResultStruct",
+    "TcpSpeedResultStruct",
+    "IsSimulatorResultStruct",
+    "TcpOffsetResultStruct",
+    "ShapesResultStruct",
+    "Response",
+    # Message types
+    "OkMsg",
+    "ErrorMsg",
+    "ResponseMsg",
+    "Message",
+    # Encode/decode
+    "decode_command",
+    "encode_command",
+    "encode_command_into",
+    "STRUCT_TO_CMDTYPE",
+    "decode_message",
+    "encode",
+    "decode",
+    "pack_ok",
+    "pack_ok_index",
+    "pack_error",
+    "pack_response",
+    "pack_status",
+    # Status buffer
+    "StatusBuffer",
+    "decode_status_bin_into",
+    # Binary frame protocol
+    "START",
+    "END",
+    "PAYLOAD_LEN",
+    "split_to_3_bytes",
+    "fuse_3_bytes",
+    "fuse_2_bytes",
+    "pack_tx_frame_into",
+    "unpack_rx_frame_into",
+]

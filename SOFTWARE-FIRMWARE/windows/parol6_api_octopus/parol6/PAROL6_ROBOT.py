@@ -1,0 +1,685 @@
+"""PAROL6 robot kinematics, limits, and configuration."""
+
+import atexit
+import logging
+import os
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Final
+
+import numpy as np
+from numpy.typing import NDArray
+from pinokin import CollisionChecker, Robot
+
+from parol6.hardware_profile import (
+    COMMISSIONING_MAX_DEG_S,
+    COMMISSIONING_MAX_DEG_S2,
+    PROFILE,
+    build_mapped_urdf,
+)
+from parol6.tools import get_tool_transform
+
+logger = logging.getLogger(__name__)
+
+Vec6f = NDArray[np.float64]
+Vec6i = NDArray[np.int32]
+Limits2f = NDArray[np.float64]  # shape (6,2)
+
+Microstep = 32
+steps_per_revolution = 200
+
+degree_per_step_constant: float = 360.0 / (Microstep * steps_per_revolution)
+radian_per_step_constant: float = (2.0 * np.pi) / (Microstep * steps_per_revolution)
+radian_per_sec_2_deg_per_sec_const: float = 360.0 / (2.0 * np.pi)
+deg_per_sec_2_radian_per_sec_const: float = (2.0 * np.pi) / 360.0
+
+# Limits (deg) you get after homing and moving to extremes
+_joint_limits_degree: Limits2f = np.array(
+    PROFILE.limits_deg,
+    dtype=np.float64,
+)
+
+_joint_limits_radian: Limits2f = np.deg2rad(_joint_limits_degree)
+
+
+# URDF consumed by the pinokin Robot below.
+_stock_urdf_path = str(
+    Path(__file__).resolve().parent / "urdf_model" / "urdf" / "PAROL6.urdf"
+)
+_urdf_path = build_mapped_urdf(_stock_urdf_path)
+_mesh_dir = str(Path(_stock_urdf_path).resolve().parent.parent)
+
+# Tool transform is applied in-place on this shared instance.
+robot: Robot = Robot(_urdf_path)
+
+# Built at import via config._init_collision_checker; None means checks disabled.
+collision: CollisionChecker | None = None
+
+
+def _resolved_urdf_for_collision() -> str:
+    """Return a path to a URDF with `package://parol6/...` rewritten to
+    absolute paths so pinokin's mesh loader can resolve them.
+
+    The PAROL6 URDF was authored for a ROS package layout (meshes at
+    `parol6/meshes/`) but the Python package places them at
+    `parol6/urdf_model/meshes/`. Rewriting at runtime keeps the source
+    URDF unchanged and avoids fragile symlink farms.
+
+    Writes a fresh temp file each call and cleans it up at interpreter exit.
+    """
+    import tempfile
+
+    src = Path(_urdf_path)
+    text = src.read_text()
+    mesh_root = Path(_mesh_dir) / "meshes"
+    # Plain absolute path, not file://: coal strips the scheme naively, which
+    # on Windows yields an invalid `/D:/...`.
+    rewritten = text.replace("package://parol6/meshes/", mesh_root.as_posix() + "/")
+    fd, tmp_path = tempfile.mkstemp(prefix="parol6_collision_", suffix=".urdf")
+    with os.fdopen(fd, "w") as f:
+        f.write(rewritten)
+
+    @atexit.register
+    def _cleanup_tmp_urdf() -> None:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    return tmp_path
+
+
+def _init_collision_checker(
+    enabled: bool, srdf_path: str, clearance_margin: float = 0.0
+) -> None:
+    """Build the singleton CollisionChecker when *enabled*.
+
+    Config values are passed in (by ``parol6.config`` after its knobs are
+    defined) rather than imported here, keeping the dependency one-directional
+    — ``config`` imports ``PAROL6_ROBOT``, not the other way around.
+    """
+    global collision
+    if not enabled:
+        collision = None
+        return
+
+    try:
+        urdf_for_collision = _resolved_urdf_for_collision()
+        c = CollisionChecker(
+            robot, urdf_for_collision, clearance_margin=clearance_margin
+        )
+        if srdf_path and os.path.exists(srdf_path):
+            c.load_srdf(srdf_path)
+        collision = c
+        logger.info(
+            "Collision checker loaded: %d pairs, %d geometry objects",
+            c.num_collision_pairs,
+            c.num_geometry_objects,
+        )
+    except Exception as e:  # noqa: BLE001
+        # Silently running with no collision checking is unsafe; require an
+        # explicit opt-out.
+        if os.getenv("PAROL6_ALLOW_NO_COLLISION"):
+            logger.warning(
+                "Collision checker init failed; continuing without it because "
+                "PAROL6_ALLOW_NO_COLLISION is set (UNSAFE): %s",
+                e,
+            )
+            collision = None
+            return
+        raise RuntimeError(
+            "Collision checker failed to initialize. Fix the cause, or set "
+            "PAROL6_ALLOW_NO_COLLISION=1 to run without collision checking "
+            f"(UNSAFE). Original error: {e}"
+        ) from e
+
+
+# Active tool's checker geometry; the key lets an unchanged re-apply skip reload.
+_active_tool_geom_names: list[str] = []
+_active_tool_geom_key: tuple[str, str | None] | None = None
+
+# Program-layer keep-out shapes on this process's checker (+ list for readback).
+_active_shape_names: list[str] = []
+_program_shapes: list = []
+
+# Installation-layer shapes; every program inherits these, set_shapes can't touch.
+_installation_shapes: list = []
+_installation_geom_names: list[str] = []
+
+
+def _refresh_collision_tool_geometry(
+    tool_key: str,
+    variant_key: str | None = None,
+) -> None:
+    """Sync the global collision checker's tool geometry with the active
+    tool. No-op if the checker isn't built yet (so this is safe to call
+    during early module init, before the checker is ensured).
+
+    Skips the work entirely when the (tool, variant) is unchanged: collision
+    mesh placement comes only from ``spec.origin``, never the TCP offset, so a
+    TCP-offset-only ``apply_tool`` would otherwise reload STLs and rebuild BVHs
+    on the control-loop thread for no change.
+    """
+    global _active_tool_geom_key
+    if collision is None:
+        return
+    key = (tool_key, variant_key)
+    if key == _active_tool_geom_key:
+        return
+    # Key stays unset until the attaches finish so a mid-loop failure
+    # self-repairs on the next call.
+    for name in _active_tool_geom_names:
+        collision.remove_geometry_by_name(name)
+    _active_tool_geom_names.clear()
+    _active_tool_geom_key = None
+
+    from parol6.tools import get_registry
+
+    cfg = None if tool_key == "NONE" else get_registry().get(tool_key)
+    if cfg is not None:
+        # An empty variant deliberately falls back to cfg.meshes (unlike WC's
+        # swap_tool_mesh).
+        meshes = cfg.meshes
+        if variant_key:
+            for v in cfg.variants:
+                if v.key == variant_key and v.meshes:
+                    meshes = v.meshes
+                    break
+        mesh_root = Path(_mesh_dir) / "meshes"
+        role_counts: dict[str, int] = {}
+        try:
+            for spec in meshes:
+                path = mesh_root / spec.file
+                # rpy is (0,0,0) for all current MeshSpecs — rotation is baked
+                # into the STL (see _MESH_RPY in tools.py).
+                T = np.eye(4, dtype=np.float64)
+                T[:3, 3] = spec.origin
+                # Pair reports speak the tool:{key}:{role} vocabulary, never
+                # raw mesh filenames; repeated roles get a positional suffix.
+                role = spec.role.name.lower()
+                n = role_counts[role] = role_counts.get(role, 0) + 1
+                geom_name = f"tool:{tool_key}:{role}" + (f"_{n}" if n > 1 else "")
+                collision.attach_mesh_to_frame(
+                    geom_name,
+                    str(path),
+                    parent_frame="L6",
+                    placement=T,
+                )
+                _active_tool_geom_names.append(geom_name)
+        except Exception:
+            # Roll back a partial attach so the checker never holds half a tool.
+            for name in _active_tool_geom_names:
+                collision.remove_geometry_by_name(name)
+            _active_tool_geom_names.clear()
+            raise
+
+    _active_tool_geom_key = key
+
+
+def apply_tool(
+    tool_name: str,
+    variant_key: str = "",
+    tcp_offset_m: tuple[float, float, float] | None = None,
+) -> None:
+    """Apply tool transform to the robot model.
+
+    ``tcp_offset_m`` is an additional (x, y, z) offset in meters, composed in
+    the tool's local frame.
+    """
+    T_tool = get_tool_transform(tool_name, variant_key=variant_key or None)
+
+    if tcp_offset_m is not None and any(v != 0 for v in tcp_offset_m):
+        T_offset = np.eye(4, dtype=np.float64)
+        T_offset[0, 3] = tcp_offset_m[0]
+        T_offset[1, 3] = tcp_offset_m[1]
+        T_offset[2, 3] = tcp_offset_m[2]
+        T_tool = T_tool @ T_offset
+
+    label = f"'{tool_name}:{variant_key}'" if variant_key else f"'{tool_name}'"
+    if not np.allclose(T_tool, np.eye(4)):
+        robot.set_tool_transform(T_tool)
+        logger.info(f"Applied tool {label} to robot model")
+    else:
+        robot.clear_tool_transform()
+        logger.info(f"Applied tool {label} (identity)")
+
+    _refresh_collision_tool_geometry(tool_name, variant_key=variant_key or None)
+
+
+def _pose_to_matrix(pose: "Sequence[float]") -> np.ndarray:
+    """[x, y, z, rx, ry, rz] (m, rad RPY) -> 4x4 world transform (R = Rz·Ry·Rx).
+
+    Implements the waldoctl ``Shape.pose`` contract: extrinsic-XYZ RPY, i.e.
+    R = Rz·Ry·Rx. Deliberately NOT ``pinokin.se3_from_rpy`` (Rx·Ry·Rz) —
+    swapping it in would mis-orient any multi-axis-tilted shape versus every
+    other implementation of the contract (including the frontend's renderer).
+    """
+    x, y, z, rx, ry, rz = pose
+    cx, sx = np.cos(rx), np.sin(rx)
+    cy, sy = np.cos(ry), np.sin(ry)
+    cz, sz = np.cos(rz), np.sin(rz)
+    rot = np.array(
+        [
+            [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx],
+            [sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx],
+            [-sy, cy * sx, cy * cx],
+        ]
+    )
+    T = np.eye(4)
+    T[:3, :3] = rot
+    T[:3, 3] = (x, y, z)
+    return T
+
+
+# Kinds pinokin's add_obstacle supports; unknown kinds raise BEFORE the old
+# collision world is removed.
+_SHAPE_KINDS = frozenset(
+    {"box", "sphere", "cylinder", "capsule", "cone", "ellipsoid", "plane"}
+)
+
+
+def _validate_shapes(shapes: "Iterable[Any]") -> "list[Any]":
+    """Set-level validation; per-shape values are enforced at Shape construction.
+
+    Covers ALL shapes (visual-only included): a marker sharing a keep-out's
+    name would shadow it in the frontend's highlight mapping. Raises before
+    any mutation so an error can never leave a half-applied world.
+    """
+    shapes = list(shapes)
+    names = [s.name for s in shapes]
+    if len(set(names)) != len(names):
+        dups = sorted({n for n in names if names.count(n) > 1})
+        raise ValueError(f"Duplicate shape name(s): {', '.join(dups)}")
+    for s in shapes:
+        if s.kind not in _SHAPE_KINDS:
+            raise ValueError(f"Shape {s.name!r}: unknown kind {s.kind!r}")
+    return shapes
+
+
+def apply_shapes(shapes: "Iterable[Any]") -> None:
+    """Replace the program-layer collision-world shapes on this process's checker.
+
+    Takes waldoctl ``Shape`` objects (the canonical in-process type — wire
+    conversion happens only at the protocol codec). Only collision-enabled
+    shapes are added — visual-only ones are skipped. Installation-layer shapes
+    (``install:`` names, from robot config) are never touched. Runs
+    per-process; the controller and planner each call it against their own
+    checker. Validation runs even without a checker: checker-off frontends
+    rely on it to reject a shape set the backend would refuse.
+    """
+    global _active_shape_names, _program_shapes
+    shapes = _validate_shapes(shapes)
+    _program_shapes = shapes
+    if collision is None:
+        return
+    for name in _active_shape_names:
+        collision.remove_geometry_by_name(name)
+    _active_shape_names = []
+    for s in shapes:
+        if not s.collision:
+            continue
+        name = f"shape:{s.name}"
+        collision.add_obstacle(
+            name, s.kind, s.params(), _pose_to_matrix(s.pose), margin=s.margin
+        )
+        _active_shape_names.append(name)
+
+
+def apply_installation_shapes(shapes: "Iterable[Any]") -> None:
+    """Replace the installation-layer shapes (from robot config) on this
+    process's checker.
+
+    Applied at import via ``parol6.config.INSTALLATION_SHAPES``, so every
+    process (controller, planner, ik-worker, dry-run) inherits the same
+    installation world without any sync. ``set_shapes`` cannot touch these.
+    """
+    global _installation_shapes
+    shapes = _validate_shapes(shapes)
+    _installation_shapes = shapes
+    if collision is None:
+        return
+    for name in _installation_geom_names:
+        collision.remove_geometry_by_name(name)
+    _installation_geom_names.clear()
+    for s in shapes:
+        if not s.collision:
+            continue
+        name = f"install:{s.name}"
+        collision.add_obstacle(
+            name, s.kind, s.params(), _pose_to_matrix(s.pose), margin=s.margin
+        )
+        _installation_geom_names.append(name)
+
+
+def installation_shapes() -> "list[Any]":
+    """The installation-layer shapes (waldoctl ``Shape`` list) for readback."""
+    return list(_installation_shapes)
+
+
+def program_shapes() -> "list[Any]":
+    """The program-layer shapes last applied to this process (for readback)."""
+    return list(_program_shapes)
+
+
+def display_pairs(
+    pairs: "Iterable[tuple[str, str]]",
+) -> "list[tuple[str, str]]":
+    """Translate checker geometry names into the reporting vocabulary:
+    URDF link names for arm geometry; ``shape:``/``install:``/``tool:``
+    names keep their user-supplied form. Never leaks backend-internal
+    identifiers (e.g. Pinocchio's ``L4_0``) to clients."""
+    if collision is None:
+        return [tuple(p) for p in pairs]
+    m = dict(collision.geometry_link_names)
+    return [(m.get(a, a), m.get(b, b)) for a, b in pairs]
+
+
+apply_tool("NONE")
+
+
+@atexit.register
+def _cleanup_robot() -> None:
+    global robot
+    del robot
+
+
+# Reduction ratio per joint
+_joint_ratio: NDArray[np.float64] = np.array(
+    PROFILE.pulses_per_degree * degree_per_step_constant,
+    dtype=np.float64,
+)
+
+# Joint speeds (steps/s)
+_joint_max_speed_hw: Vec6i = np.array(
+    np.rint(PROFILE.pulses_per_degree * COMMISSIONING_MAX_DEG_S), dtype=np.int32
+)
+_joint_min_speed: Vec6i = np.array([10, 10, 10, 10, 10, 10], dtype=np.int32)
+
+_joint_max_speed: Vec6i = _joint_max_speed_hw.copy()
+
+# 80% of scaled max for safety margin during jogging
+_joint_max_jog_speed: Vec6i = (_joint_max_speed * 0.8).astype(np.int32)
+_joint_min_jog_speed: Vec6i = np.array([10, 10, 10, 10, 10, 10], dtype=np.int32)
+
+# Joint accelerations (steps/s^2) per joint
+# Derived: a_max = v_max * 3 (reach max speed in ~0.33s)
+_joint_max_acc: Vec6i = np.rint(
+    PROFILE.pulses_per_degree * COMMISSIONING_MAX_DEG_S2
+).astype(np.int32)
+
+# Maximum jerk limits (steps/s^3) per joint
+# Derived: j_max = a_max * 10 (reach max accel in ~0.1s)
+_joint_max_jerk: Vec6i = (_joint_max_acc * 10).astype(np.int32)
+
+_joint_speed_rad = (
+    _joint_max_speed.astype(float) * radian_per_step_constant / _joint_ratio
+)
+_joint_acc_rad = _joint_max_acc.astype(float) * radian_per_step_constant / _joint_ratio
+_joint_jerk_rad = (
+    _joint_max_jerk.astype(float) * radian_per_step_constant / _joint_ratio
+)
+
+
+# Pre-computed Cartesian limits from Jacobian pseudoinverse workspace sampling.
+# Derived from _compute_tcp_velocity_at_config() over 500/200/200 random configs
+# with seeds 42/43/44, using median velocity and mean angular rates from wrist joints.
+# Values are floored to reasonable precision to avoid false precision.
+#
+# Linear units: mm/s, mm/s^2, mm/s^3
+# Angular units: deg/s, deg/s^2, deg/s^3
+_cart_linear_velocity_max: float = 20
+_cart_angular_velocity_max: float = 15
+_cart_linear_acc_max: float = 50
+_cart_angular_acc_max: float = 35
+_cart_linear_jerk_max: float = 500
+_cart_angular_jerk_max: float = 350
+
+# Min values as 1% of max
+_cart_linear_velocity_min: float = _cart_linear_velocity_max * 0.01
+_cart_angular_velocity_min: float = _cart_angular_velocity_max * 0.01
+_cart_linear_acc_min: float = _cart_linear_acc_max * 0.01
+_cart_angular_acc_min: float = _cart_angular_acc_max * 0.01
+_cart_linear_jerk_min: float = _cart_linear_jerk_max * 0.01
+_cart_angular_jerk_min: float = _cart_angular_jerk_max * 0.01
+
+# Jog limits (80% of max for safety margin)
+_cart_linear_velocity_max_JOG: float = _cart_linear_velocity_max * 0.8
+_cart_linear_velocity_min_JOG: float = _cart_linear_velocity_min
+
+
+def log_derived_limits() -> None:
+    """Log the derived Cartesian limits. Call at controller startup."""
+    logger.info("=== Derived Kinematic Limits ===")
+    logger.info("Joint velocity (rad/s): %s", np.round(_joint_speed_rad, 3))
+    logger.info("Joint accel (rad/s²): %s", np.round(_joint_acc_rad, 2))
+    logger.info("Joint jerk (rad/s³): %s", np.round(_joint_jerk_rad, 1))
+    logger.info(
+        "Cartesian linear velocity: %.1f mm/s (jog: %.1f mm/s)",
+        _cart_linear_velocity_max,
+        _cart_linear_velocity_max_JOG,
+    )
+    logger.info("Cartesian angular velocity: %.2f deg/s", _cart_angular_velocity_max)
+    logger.info(
+        "Cartesian linear accel: %.1f mm/s², angular: %.2f deg/s²",
+        _cart_linear_acc_max,
+        _cart_angular_acc_max,
+    )
+    logger.info(
+        "Cartesian linear jerk: %.1f mm/s³, angular: %.2f deg/s³",
+        _cart_linear_jerk_max,
+        _cart_angular_jerk_max,
+    )
+    logger.info("================================")
+
+
+# Standby positions
+_standby_deg: Vec6f = PROFILE.standby_deg
+
+
+# -----------------------------
+# Typed hierarchical API
+# -----------------------------
+@dataclass(frozen=True)
+class Joint:
+    """Minimal joint configuration - all values in native units (deg for position, steps/s for speed)."""
+
+    limits_deg: Limits2f  # Position limits in degrees [6, 2]
+    speed_max: Vec6i  # Max speed in steps/s
+    speed_min: Vec6i  # Min speed in steps/s
+    jog_speed_max: Vec6i  # Max jog speed in steps/s
+    jog_speed_min: Vec6i  # Min jog speed in steps/s
+    acc_max: Vec6i  # Max acceleration in steps/s²
+    jerk_max: Vec6i  # Max jerk in steps/s³
+    ratio: Vec6f  # Gear ratio per joint
+    standby_deg: Vec6f  # Standby position in degrees
+
+
+@dataclass(frozen=True)
+class RangeF:
+    min: float
+    max: float
+
+
+@dataclass(frozen=True)
+class CartVel:
+    linear: RangeF
+    jog: RangeF
+    angular: RangeF
+
+
+@dataclass(frozen=True)
+class CartAcc:
+    linear: RangeF
+    angular: RangeF
+
+
+@dataclass(frozen=True)
+class CartJerk:
+    linear: RangeF
+    angular: RangeF
+
+
+@dataclass(frozen=True)
+class Cart:
+    vel: CartVel
+    acc: CartAcc
+    jerk: CartJerk
+
+
+@dataclass(frozen=True)
+class Conv:
+    degree_per_step: float
+    radian_per_step: float
+    rad_sec_to_deg_sec: float
+    deg_sec_to_rad_sec: float
+
+
+joint: Final[Joint] = Joint(
+    limits_deg=_joint_limits_degree,
+    speed_max=_joint_max_speed,
+    speed_min=_joint_min_speed,
+    jog_speed_max=_joint_max_jog_speed,
+    jog_speed_min=_joint_min_jog_speed,
+    acc_max=_joint_max_acc,
+    jerk_max=_joint_max_jerk,
+    ratio=_joint_ratio,
+    standby_deg=_standby_deg,
+)
+
+cart: Final[Cart] = Cart(
+    vel=CartVel(
+        linear=RangeF(min=_cart_linear_velocity_min, max=_cart_linear_velocity_max),
+        jog=RangeF(
+            min=_cart_linear_velocity_min_JOG, max=_cart_linear_velocity_max_JOG
+        ),
+        angular=RangeF(min=_cart_angular_velocity_min, max=_cart_angular_velocity_max),
+    ),
+    acc=CartAcc(
+        linear=RangeF(min=_cart_linear_acc_min, max=_cart_linear_acc_max),
+        angular=RangeF(min=_cart_angular_acc_min, max=_cart_angular_acc_max),
+    ),
+    jerk=CartJerk(
+        linear=RangeF(min=_cart_linear_jerk_min, max=_cart_linear_jerk_max),
+        angular=RangeF(min=_cart_angular_jerk_min, max=_cart_angular_jerk_max),
+    ),
+)
+
+conv: Final[Conv] = Conv(
+    degree_per_step=degree_per_step_constant,
+    radian_per_step=radian_per_step_constant,
+    rad_sec_to_deg_sec=radian_per_sec_2_deg_per_sec_const,
+    deg_sec_to_rad_sec=deg_per_sec_2_radian_per_sec_const,
+)
+
+
+# -----------------------------
+# CAN helpers and bitfield utils (used by transports/gripper)
+# -----------------------------
+def extract_from_can_id(can_id: int) -> tuple[int, int, int]:
+    id2 = (can_id >> 7) & 0xF
+    can_command = (can_id >> 1) & 0x3F
+    error_bit = can_id & 0x1
+    return id2, can_command, error_bit
+
+
+def combine_2_can_id(id2: int, can_command: int, error_bit: int) -> int:
+    can_id = 0
+    can_id |= (id2 & 0xF) << 7
+    can_id |= (can_command & 0x3F) << 1
+    can_id |= error_bit & 0x1
+    return can_id
+
+
+def fuse_bitfield_2_bytearray(var_in: list[int] | tuple[int, ...]) -> bytes:
+    number = 0
+    for b in var_in:
+        number = (2 * number) + int(b)
+    return bytes([number])
+
+
+def split_2_bitfield(var_in: int) -> list[int]:
+    return [(var_in >> i) & 1 for i in range(7, -1, -1)]
+
+
+if __name__ == "__main__":
+    # Recalculate Cartesian limits from current joint parameters.
+    # Run: python -m parol6.PAROL6_ROBOT
+    #
+    # Uses Jacobian pseudoinverse workspace sampling to derive achievable
+    # TCP velocity/acceleration/jerk while maintaining tool orientation.
+    # Copy the printed values into the pre-computed constants above.
+
+    from parol6.config import steps_to_rad
+
+    def _compute_tcp_velocity_at_config(
+        q: NDArray, direction: int, v_max_joint: NDArray
+    ) -> float | None:
+        """Max TCP velocity in one Cartesian direction.
+
+        For linear directions (0-2), rejects samples that cause orientation change.
+        For angular directions (3-5), rejects samples that cause linear translation.
+        """
+        try:
+            J = robot.jacob0(q)
+            if np.linalg.cond(J) > 1e6:
+                return None
+            desired = np.zeros(6)
+            desired[direction] = 1.0
+            q_dot = np.linalg.pinv(J) @ desired
+            if direction < 3:
+                if np.linalg.norm(J[3:, :] @ q_dot) > 0.01:
+                    return None
+            else:
+                if np.linalg.norm(J[:3, :] @ q_dot) > 0.01:
+                    return None
+            return float(np.min(v_max_joint / (np.abs(q_dot) + 1e-10)))
+        except (np.linalg.LinAlgError, ValueError):
+            return None
+
+    _home_rad = np.deg2rad(_standby_deg)
+
+    def _sample_limit(
+        n_samples: int, seed: int, v_max: NDArray, spread_deg: float = 30.0
+    ) -> tuple[float, float]:
+        """Sample around home position and return (median_linear_m, median_angular_rad).
+
+        Samples joint configurations from a Gaussian centered on home with
+        std dev of ``spread_deg`` degrees, clamped to joint limits.
+        """
+        rng = np.random.default_rng(seed)
+        spread_rad = np.deg2rad(spread_deg)
+        lin_results = []
+        ang_results = []
+        for _ in range(n_samples):
+            q = _home_rad + rng.normal(0, spread_rad, size=6)
+            q = np.clip(q, _joint_limits_radian[:, 0], _joint_limits_radian[:, 1])
+            for d in range(3):
+                v = _compute_tcp_velocity_at_config(q, d, v_max)
+                if v is not None and v > 0.001:
+                    lin_results.append(v)
+            for d in range(3, 6):
+                v = _compute_tcp_velocity_at_config(q, d, v_max)
+                if v is not None and v > 0.001:
+                    ang_results.append(v)
+        linear = float(np.median(lin_results)) if lin_results else 0.1
+        angular = float(np.median(ang_results)) if ang_results else 0.1
+        return linear, angular
+
+    vel_lin, vel_ang = _sample_limit(500, 42, _joint_speed_rad)
+    acc_lin, acc_ang = _sample_limit(200, 43, _joint_acc_rad)
+    jerk_lin, jerk_ang = _sample_limit(200, 44, _joint_jerk_rad)
+
+    print("=== Recalculated Cartesian Limits ===")
+    print(f"_cart_linear_velocity_max: float = {vel_lin * 1000:.0f}")
+    print(f"_cart_angular_velocity_max: float = {np.degrees(vel_ang):.0f}")
+    print(f"_cart_linear_acc_max: float = {acc_lin * 1000:.0f}")
+    print(f"_cart_angular_acc_max: float = {np.degrees(acc_ang):.0f}")
+    print(f"_cart_linear_jerk_max: float = {jerk_lin * 1000:.0f}")
+    print(f"_cart_angular_jerk_max: float = {np.degrees(jerk_ang):.0f}")
+
+    print("\n=== Joint Info ===")
+    j_step_rad = np.zeros(6, dtype=np.float64)
+    steps_to_rad(np.array([1, 1, 1, 1, 1, 1], dtype=np.int32), j_step_rad)
+    print("Smallest step (deg):", np.rad2deg(j_step_rad))
+    print("Standby deg:", joint.standby_deg)

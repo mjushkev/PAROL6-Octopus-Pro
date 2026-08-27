@@ -4,6 +4,22 @@
 
 ### Added
 
+- Commander `1.0.0-commander-rc1`: a fork of Waldo Commander main at
+  `3de942af856f1727eaa01dc8f8d81d7cf564cb6d`, adapted to
+  `PAROL6-MATTJ-001` with the measured limits, directions, pulses-per-degree,
+  mapped URDF, J5 −130° standby and persistent J1 Manual/Auto homing selector.
+- Checksum-gated P6B1 direct-USB transport and separate Octopus H723 firmware:
+  CRC32C, monotonic sequence rejection, exact owner-profile handshake,
+  512-point firmware queue, 120 ms host lookahead, graceful finish-and-hold,
+  30 ms underrun grace, 250 ms watchdog, 100 ms homing heartbeat, sensor and
+  soft-limit guards, and out-of-band STOP.
+- Reproducible pure-Python ELF-to-SD-image packager for Windows environments
+  where application control blocks `arm-none-eabi-objcopy`, with flash-vector,
+  sector-boundary, profile and SHA-256 manifest checks.
+- One-click Windows install/start scripts with Simulator and checksum-gated
+  Hardware acceptance modes. Hardware mode remains capped at 10% and visibly
+  warns that the portable Windows runtime has not restored collision checking.
+
 - Stage 3 Robot Commander foundation: a direct-USB, local multi-waypoint
   program editor with live-pose capture, all-six-joint target editing,
   per-waypoint 1–10% speed and 0–60 second wait, repeat/reorder, JSON

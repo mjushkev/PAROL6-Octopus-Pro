@@ -1,0 +1,130 @@
+[build-system]
+requires = ["setuptools>=61.0", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parol6"
+dynamic = ["version"]
+description = "Python library for controlling PAROL6 robot arms"
+
+requires-python = ">=3.11"
+dependencies = [
+    # pinokin: Pinocchio-based FK/IK bindings
+    # https://github.com/Jepson2k/pinokin/releases/tag/v0.1.8
+
+    # macOS ARM64 (Apple Silicon)
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp311-cp311-macosx_15_0_arm64.whl ; python_version == '3.11' and platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp312-cp312-macosx_15_0_arm64.whl ; python_version == '3.12' and platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp313-cp313-macosx_15_0_arm64.whl ; python_version == '3.13' and platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp314-cp314-macosx_15_0_arm64.whl ; python_version == '3.14' and platform_system == 'Darwin' and platform_machine == 'arm64'",
+
+    # Windows AMD64
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp311-cp311-win_amd64.whl ; python_version == '3.11' and platform_system == 'Windows' and platform_machine == 'AMD64'",
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp312-cp312-win_amd64.whl ; python_version == '3.12' and platform_system == 'Windows' and platform_machine == 'AMD64'",
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp313-cp313-win_amd64.whl ; python_version == '3.13' and platform_system == 'Windows' and platform_machine == 'AMD64'",
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp314-cp314-win_amd64.whl ; python_version == '3.14' and platform_system == 'Windows' and platform_machine == 'AMD64'",
+
+    # Linux x86_64
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp311-cp311-manylinux_2_39_x86_64.whl ; python_version == '3.11' and platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp312-cp312-manylinux_2_39_x86_64.whl ; python_version == '3.12' and platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp313-cp313-manylinux_2_39_x86_64.whl ; python_version == '3.13' and platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp314-cp314-manylinux_2_39_x86_64.whl ; python_version == '3.14' and platform_system == 'Linux' and platform_machine == 'x86_64'",
+
+    # Linux aarch64 (ARM64)
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp311-cp311-manylinux_2_39_aarch64.whl ; python_version == '3.11' and platform_system == 'Linux' and platform_machine == 'aarch64'",
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp312-cp312-manylinux_2_39_aarch64.whl ; python_version == '3.12' and platform_system == 'Linux' and platform_machine == 'aarch64'",
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp313-cp313-manylinux_2_39_aarch64.whl ; python_version == '3.13' and platform_system == 'Linux' and platform_machine == 'aarch64'",
+    "pinokin @ https://github.com/Jepson2k/pinokin/releases/download/v0.1.8/pinokin-0.1.8-cp314-cp314-manylinux_2_39_aarch64.whl ; python_version == '3.14' and platform_system == 'Linux' and platform_machine == 'aarch64'",
+
+    "pyserial>=3.4",
+    "scipy>=1.11.4",
+    "ruckig>=0.12.2",
+    "toppra>=0.6.3",
+    "interpolatepy>=2.0.0",
+    "numpy>=2.0,<2.5",  # numba (0.6x) requires numpy<2.5
+    "numba>=0.59",
+    "psutil>=5.9",
+    "msgspec>=0.18",
+    "ormsgpack>=1.4.0",
+    "waldoctl @ git+https://github.com/Jepson2k/waldoctl.git@v0.7.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["parol6*"]
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "ty",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-timeout",
+    "pre-commit",
+    "trimesh",
+    "fast-simplification",
+    "rtree",
+    "scipy-stubs",
+    "types-pyserial",
+]
+
+[project.scripts]
+parol6-server = "parol6.cli.server:main_entry"
+
+[project.entry-points."waldoctl.robots"]
+parol6 = "parol6.robot:Robot"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+    "--junitxml=test-results.xml",
+]
+timeout = 45
+timeout_method = "thread"
+markers = [
+    "unit: Unit tests that test individual components in isolation",
+    "integration: Integration tests that test component interactions with FAKE_SERIAL",
+    "e2e: End-to-end tests that exercise complete workflows",
+    "examples: Standalone example scripts (binds port 5001, run with `pytest -m examples`)",
+]
+log_cli = false
+log_level = "DEBUG"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.ty]
+# Dynamic Command union (built at import time from tagged structs)
+# generates invalid-type-form in all files that reference it.
+[[tool.ty.overrides]]
+include = [
+    "parol6/protocol/wire.py",
+    "parol6/commands/base.py",
+    "parol6/server/command_registry.py",
+    "parol6/server/command_executor.py",
+]
+[tool.ty.overrides.rules]
+invalid-type-form = "ignore"
+
+# pinokin is a compiled extension; the lint env's build can predate
+# CollisionChecker, so ty can't resolve that symbol (it resolves fine at runtime
+# and against a matching pinokin build).
+[[tool.ty.overrides]]
+include = ["parol6/PAROL6_ROBOT.py"]
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+parol6 = ["urdf_model/**", "profiles/*.json"]
+
+[tool.setuptools_scm]
+# Version comes from the latest git tag reachable from HEAD.
