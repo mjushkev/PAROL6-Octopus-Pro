@@ -1928,7 +1928,9 @@ class ControlPanel:
 
     def render_jog_content(self) -> None:
         """Render jog controls (tabs + grids) and settings."""
-        with ui.tabs().props("dense").classes("cp-jog-tabs") as jog_mode_tabs:
+        with ui.tabs().props("dense align=justify").classes(
+            "cp-jog-tabs w-full"
+        ) as jog_mode_tabs:
             joint_tab = ui.tab("Joint Jog").mark("tab-joint")
             cart_tab = ui.tab("Cartesian Jog").mark("tab-cartesian")
             settings_tab = ui.tab("Settings").mark("tab-settings")
@@ -1959,16 +1961,21 @@ class ControlPanel:
 
         with (
             ui.tab_panels(jog_mode_tabs, value=joint_tab)
-            .classes("cp-jog-panels")
-            .style("width: 400px; height: 225px")
+            .classes("cp-jog-panels w-full")
+            .style(
+                "width: 100%; height: min(290px, calc(100vh - 350px));"
+                " min-height: 250px;"
+            )
         ):
             # Joint jog panel
-            with ui.tab_panel(joint_tab).classes("gap-1"):
+            with ui.tab_panel(joint_tab).classes("gap-1 w-full"):
                 joint_names = list(ui_state.active_robot.joints.names)
 
                 def make_joint_row(idx: int, name: str):
-                    with ui.grid(rows="auto", columns="60px auto 80px").classes(
-                        "items-center gap-3 w-full"
+                    with ui.grid(
+                        rows="auto", columns="64px minmax(220px, 1fr) 80px"
+                    ).classes(
+                        "items-center gap-2 w-full"
                     ):
                         ui.label(name).classes("text-right")
                         with ui.row().classes("w-full relative-position"):
@@ -2252,8 +2259,10 @@ class ControlPanel:
                 self._refresh_cartesian_icons()
 
             # Settings panel
-            with ui.tab_panel(settings_tab).classes("gap-0 p-0"):
-                with ui.scroll_area().classes("w-full h-full p-0"):
+            with ui.tab_panel(settings_tab).classes("gap-0 p-0 w-full"):
+                with ui.scroll_area().classes(
+                    "settings-scroll w-full h-full p-0"
+                ):
                     self._settings_content = SettingsContent(self.client)
                     self._settings_content.build_embedded(
                         ai_control_section=self._build_control_mode_selector
@@ -2371,7 +2380,9 @@ class ControlPanel:
             self.CLICK_HOLD_THRESHOLD_S, ui_client_fn
         )
 
-        with ui.card().classes(f"overlay-panel overlay-card overlay-{anchor} gap-1"):
+        with ui.card().classes(
+            f"overlay-panel overlay-card overlay-{anchor} cp-control-card gap-1"
+        ):
             with ui.column().classes("gap-2 w-full"):
                 with ui.row().classes("items-center w-full"):
                     with ui.column().classes("gap-1 flex-grow"):
@@ -2471,7 +2482,7 @@ class ControlPanel:
 
     def _build_action_row(self) -> None:
         """Build the action row: Home, Robot/Sim toggle, gizmo controls, camera reset, step input."""
-        with ui.row().classes("gap-2 items-center"):
+        with ui.row().classes("cp-action-row gap-1 items-center w-full no-wrap"):
             ui.button(icon="home", on_click=self.send_home).props(
                 "dense round unelevated color=teal-6"
             ).tooltip("Home (H)").mark("btn-home")
@@ -2580,14 +2591,11 @@ class ControlPanel:
                 with self._step_input:
                     self._step_input_tooltip = ui.tooltip("Step size in degrees")
 
-            with ui.element("div").style(
-                "width: 0; height: 0; overflow: visible; position: relative;"
-            ):
-                ui.button(
-                    icon="dangerous", color="negative", on_click=self.on_estop_click
-                ).props("round unelevated").classes("glass-btn text-2xl").style(
-                    "position: absolute; top: -18px; left: 10px;"
-                ).tooltip("E-Stop (Esc)").mark("btn-estop")
+            ui.button(
+                icon="dangerous", color="negative", on_click=self.on_estop_click
+            ).props("round unelevated dense").classes(
+                "glass-btn text-xl cp-estop-btn"
+            ).tooltip("E-Stop (Esc)").mark("btn-estop")
 
     def cleanup(self) -> None:
         """Cancel background timers during shutdown."""
@@ -2597,3 +2605,8 @@ class ControlPanel:
             self._joint_click_hold.cleanup()
         if self._cart_click_hold:
             self._cart_click_hold.cleanup()
+
+    def bind_appearance_scene(self, scene) -> None:
+        """Connect settings widgets to this browser client's completed 3D scene."""
+        if self._settings_content is not None:
+            self._settings_content.bind_appearance_scene(scene)

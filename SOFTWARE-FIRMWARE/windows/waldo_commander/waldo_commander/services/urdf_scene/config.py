@@ -85,6 +85,11 @@ class UrdfSceneConfig:
     edit_opacity: float = 0.4
     """Opacity for robot in editing mode."""
 
+    component_appearance: dict[str, dict[str, str | float]] = field(
+        default_factory=dict
+    )
+    """Persisted per-component color and opacity overrides."""
+
     tool_body_material: str = SceneColors.TOOL_BODY_HEX
     """Color for tool body meshes in live mode."""
 

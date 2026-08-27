@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Callable
 from contextlib import contextmanager
+from typing import Any
 
 from nicegui import app as ng_app
 from nicegui import ui
@@ -59,6 +60,10 @@ class SettingsContent:
         self._cam_refresh_timer: ui.timer | None = None
         self._variant_container: ui.column | None = None
         self._tcp_offset_container: ui.column | None = None
+        self._appearance_scene = None
+        self._appearance_widgets: dict[str, Any] = {}
+        self._appearance_sync: Callable[[str | None], None] | None = None
+        self._appearance_select_from_scene: Callable[[str], None] | None = None
 
     def _load_preferences(self) -> dict:
         """Load persisted preferences from storage."""
@@ -92,6 +97,171 @@ class SettingsContent:
             self._refresh_timer.cancel()
         if self._cam_refresh_timer is not None:
             self._cam_refresh_timer.cancel()
+        if self._appearance_scene is not None:
+            self._appearance_scene.set_component_select_callback(None)
+
+    def _build_model_appearance(self) -> None:
+        """Build persistent, click-selectable robot component material controls."""
+        from waldo_commander.services.urdf_scene.urdf_scene import scene_for_client
+
+        scene = scene_for_client(str(ui.context.client.id))
+        state = {"selection": "robot", "syncing": False}
+        widgets = self._appearance_widgets
+
+        def _persist() -> None:
+            scene = self._appearance_scene
+            if scene is None:
+                return
+            ng_app.storage.general["model/component_appearance"] = (
+                scene.component_appearance_overrides()
+            )
+
+        def _sync(selection: str | None = None) -> None:
+            scene = self._appearance_scene
+            selector = widgets.get("selector")
+            if scene is None or selector is None:
+                return
+            options = selector.options
+            key = selection or str(state["selection"])
+            if key not in options:
+                key = "robot"
+            state["selection"] = key
+            color, opacity, mixed = scene.component_appearance(key)
+            state["syncing"] = True
+            color_input = widgets.get("color")
+            opacity_slider = widgets.get("opacity")
+            opacity_label = widgets.get("opacity_label")
+            mixed_label = widgets.get("mixed")
+            selector.value = key
+            selector.update()
+            if color_input is not None:
+                color_input.value = color
+                color_input.update()
+            if opacity_slider is not None:
+                opacity_slider.value = round(opacity * 100)
+                opacity_slider.update()
+            if opacity_label is not None:
+                opacity_label.text = f"{opacity * 100:.0f}%"
+            if mixed_label is not None:
+                mixed_label.text = "Mixed values" if mixed else ""
+            state["syncing"] = False
+
+        def _select(e) -> None:
+            _sync(str(e.value))
+
+        def _set_color(e) -> None:
+            if state["syncing"] or not e.value:
+                return
+            scene = self._appearance_scene
+            if scene is None:
+                return
+            scene.set_component_appearance(
+                str(state["selection"]), color=str(e.value)
+            )
+            _persist()
+
+        def _set_opacity(e) -> None:
+            if state["syncing"] or e.value is None:
+                return
+            scene = self._appearance_scene
+            if scene is None:
+                return
+            scene.set_component_appearance(
+                str(state["selection"]), opacity=float(e.value) / 100.0
+            )
+            widgets["opacity_label"].text = f"{float(e.value):.0f}%"
+            _persist()
+
+        def _make_solid() -> None:
+            scene = self._appearance_scene
+            if scene is None:
+                return
+            scene.set_component_appearance(str(state["selection"]), opacity=1.0)
+            _persist()
+            _sync()
+
+        def _reset_selected() -> None:
+            scene = self._appearance_scene
+            if scene is None:
+                return
+            scene.reset_component_appearance(str(state["selection"]))
+            _persist()
+            _sync()
+
+        def _reset_all() -> None:
+            scene = self._appearance_scene
+            if scene is None:
+                return
+            scene.reset_component_appearance("robot")
+            _persist()
+            _sync("robot")
+
+        def _select_from_scene(key: str) -> None:
+            selector = widgets.get("selector")
+            options = selector.options if selector is not None else {}
+            if key in options:
+                _sync(key)
+
+        self._appearance_sync = _sync
+        self._appearance_select_from_scene = _select_from_scene
+
+        with ui.expansion("Model Appearance", icon="palette").classes(
+            "w-full model-appearance"
+        ).props("dense header-class=px-0"):
+            ui.label("Click a part on the 3D robot, or choose it below.").classes(
+                "text-xs text-gray-400"
+            )
+            widgets["selector"] = ui.select(
+                options={"robot": "Entire robot"},
+                value="robot",
+                on_change=_select,
+            ).classes("w-full").props("dense options-dense")
+            widgets["mixed"] = ui.label("").classes(
+                "text-xs text-amber-400 min-h-[16px]"
+            )
+            with ui.row().classes("w-full items-center gap-3 no-wrap"):
+                widgets["color"] = ui.color_input(
+                    "Color",
+                    value="#c77d28",
+                    on_change=_set_color,
+                    preview=True,
+                ).classes("w-36").props("dense")
+                ui.label("Opacity").classes("text-xs whitespace-nowrap")
+                widgets["opacity"] = ui.slider(
+                    min=10, max=100, step=1, value=100, on_change=_set_opacity
+                ).classes("flex-grow")
+                widgets["opacity_label"] = ui.label("100%").classes(
+                    "text-xs w-10 text-right"
+                )
+            with ui.row().classes("w-full gap-2 flex-wrap"):
+                ui.button("Make solid", icon="opacity", on_click=_make_solid).props(
+                    "dense no-caps unelevated color=teal-7"
+                )
+                ui.button(
+                    "Reset part", icon="restart_alt", on_click=_reset_selected
+                ).props("dense no-caps flat")
+                ui.button(
+                    "Reset all", icon="settings_backup_restore", on_click=_reset_all
+                ).props("dense no-caps flat")
+
+        if scene is not None:
+            self.bind_appearance_scene(scene)
+
+    def bind_appearance_scene(self, scene) -> None:
+        """Attach appearance widgets after this browser client's scene is ready."""
+        if self._appearance_scene is not None and self._appearance_scene is not scene:
+            self._appearance_scene.set_component_select_callback(None)
+        self._appearance_scene = scene
+        selector = self._appearance_widgets.get("selector")
+        if selector is None:
+            return
+        options = scene.component_catalog() or {"robot": "Entire robot"}
+        selector.options = options
+        selector.update()
+        if self._appearance_select_from_scene is not None:
+            scene.set_component_select_callback(self._appearance_select_from_scene)
+        if self._appearance_sync is not None:
+            self._appearance_sync("robot")
 
     # ── Tool helpers ─────────────────────────────────────────────────
 
@@ -794,6 +964,7 @@ class SettingsContent:
             self._build_camera,
             lambda: self._build_motion_profile(prefs),
             lambda: self._build_theme(prefs),
+            self._build_model_appearance,
             lambda: self._build_reference_frames(prefs),
             lambda: self._build_jog_inversion(prefs),
             self._build_backend_selector,

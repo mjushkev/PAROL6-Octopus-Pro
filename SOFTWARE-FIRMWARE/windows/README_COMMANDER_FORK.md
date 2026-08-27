@@ -15,7 +15,22 @@ using the measured owner profile:
 - J5 post-home standby at -130 degrees
 - J6 hard cable limit of -180 to +180 degrees
 - owner-coordinate URDF mapping for Waldo visualization, FK, and IK
+- click-selectable colors and opacity for individual disconnected model parts,
+  including separate covers and housings where the URDF mesh preserves them
+- responsive controls that keep all six jog rows and the E-stop visible and
+  prevent horizontal scrolling in the Settings panel
 - portable Windows builds of TOPP-RA and Pinokin APIs
+
+## Model appearance
+
+Open **Settings → Model Appearance**. Click a visible component on the 3D
+robot (or choose it from the grouped selector), then set its color and opacity.
+Selections can target one component, a whole link, or the entire robot. Changes
+persist between launches. **Make solid** sets the selected opacity to 100%; the
+reset buttons restore either the selected part or the whole robot.
+
+The visual splitter operates only on disconnected shells in the displayed STL.
+It does not alter the URDF joints, motion planning, limits, or collision model.
 
 ## Start the simulator
 

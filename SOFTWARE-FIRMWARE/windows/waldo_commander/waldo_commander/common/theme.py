@@ -693,14 +693,45 @@ html, body {
 }
 
 /* Control panel jog tabs: compact padding */
+.cp-control-card {
+  width: min(520px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  box-sizing: border-box;
+}
+.cp-control-card > * { min-width: 0; }
+.cp-action-row { max-width: 100%; }
+.cp-action-row .step-input { width: 66px; min-width: 66px; }
+.cp-estop-btn { flex: 0 0 auto; }
 .cp-jog-tabs .q-tab {
-  padding: 0 14px !important;
+  padding: 0 10px !important;
   min-height: 28px !important;
 }
 .cp-jog-panels .q-tab-panels,
 .cp-jog-panels .q-tab-panel {
   padding: 0 !important;
-  overflow: hidden;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden !important;
+}
+.cp-jog-panels .q-tab-panel {
+  overflow-y: auto !important;
+}
+.settings-scroll .q-scrollarea__container,
+.settings-scroll .q-scrollarea__content {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow-x: hidden !important;
+  box-sizing: border-box;
+}
+.settings-scroll .q-scrollarea__content > * {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.model-appearance .q-expansion-item__content {
+  width: 100%;
+  max-width: 100%;
 }
 
 

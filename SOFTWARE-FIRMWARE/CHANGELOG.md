@@ -4,6 +4,15 @@
 
 ### Added
 
+- Per-component 3D model appearance controls in Commander. Combined URDF link
+  meshes are split into their disconnected physical shells at runtime, so the
+  operator can click covers, housings, shafts, and other separate components
+  and assign persistent colors and opacity without changing kinematics or the
+  collision model.
+- A responsive 520 px control-panel layout that keeps the software E-stop and
+  every joint-jog row visible at 1280×720, gives Settings the full card width,
+  and prevents horizontal Settings scrolling.
+
 - Commander `1.0.0-commander-rc1`: a fork of Waldo Commander main at
   `3de942af856f1727eaa01dc8f8d81d7cf564cb6d`, adapted to
   `PAROL6-MATTJ-001` with the measured limits, directions, pulses-per-degree,

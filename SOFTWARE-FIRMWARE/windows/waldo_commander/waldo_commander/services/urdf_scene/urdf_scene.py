@@ -41,6 +41,7 @@ from waldo_commander.services.urdf_scene.scene_batch import batch_scene
 from waldo_commander.state import simulation_state, robot_state, ui_state
 
 from .config import RobotAppearanceMode, ToolPose, UrdfSceneConfig
+from .component_meshes import split_stl_components
 from .loader import (
     load_urdf,
     resolve_meshes_dir,
@@ -57,6 +58,23 @@ from .path_renderer import PathRenderer
 logger: TraceLogger = logging.getLogger(__name__)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
 SHAPE_OPACITY = 0.35
+
+_ROBOT_LINK_LABELS = {
+    "base_link": "Electronics base",
+    "L1": "Base turret",
+    "L2": "Shoulder / upper arm",
+    "L3": "Elbow",
+    "L4": "Forearm",
+    "L5": "Wrist",
+    "L6": "Tool flange",
+}
+
+_SCENES_BY_CLIENT: dict[str, "UrdfScene"] = {}
+
+
+def scene_for_client(client_id: str | None) -> "UrdfScene | None":
+    """Return the scene built for a specific NiceGUI browser client."""
+    return _SCENES_BY_CLIENT.get(str(client_id)) if client_id else None
 
 # three.js cylinders/cones extend along +Y; coal's primitives are Z-aligned.
 # Rx(+90°) maps +Y -> +Z so the drawn shape matches the enforced volume.
@@ -223,6 +241,12 @@ class UrdfScene(
         """
         path = Path(path)
         self.config = config or UrdfSceneConfig()
+        try:
+            self._client_id = str(ui.context.client.id)
+        except (RuntimeError, AttributeError):
+            self._client_id = ""
+        if self._client_id:
+            _SCENES_BY_CLIENT[self._client_id] = self
 
         self.urdf_model = load_urdf(path, package_map=self.config.package_map)
 
@@ -230,6 +254,17 @@ class UrdfScene(
 
         self.meshes_dir = resolve_meshes_dir(path, self.config.meshes_dir)
         self.meshes_url = f"{self.config.static_url_prefix}/{self.urdf_model.name}"
+        runtime_root = Path(
+            os.environ.get(
+                "PAROL6_RUNTIME_CACHE",
+                str(Path.home() / ".cache" / "parol6-waldo"),
+            )
+        )
+        self.component_meshes_dir = (
+            runtime_root / "component-meshes" / self.urdf_model.name
+        )
+        self.component_meshes_dir.mkdir(parents=True, exist_ok=True)
+        self.component_meshes_url = f"/component-meshes/{self.urdf_model.name}"
         self.joint_names = self.urdf_model.actuated_joint_names
 
         if self.config.mount_static:
@@ -242,6 +277,19 @@ class UrdfScene(
                     logger.debug(
                         "Static files already registered for %s; continuing",
                         self.meshes_url,
+                    )
+                else:
+                    raise
+            try:
+                app.add_static_files(
+                    self.component_meshes_url, str(self.component_meshes_dir)
+                )
+            except Exception as e:
+                msg = str(e).lower()
+                if "already" in msg and "register" in msg:
+                    logger.debug(
+                        "Component mesh files already registered for %s; continuing",
+                        self.component_meshes_url,
                     )
                 else:
                     raise
@@ -284,6 +332,15 @@ class UrdfScene(
         self._rendered_playback_step: int = -1
 
         self._robot_meshes: list[ui.scene.stl] = []
+        self._component_meshes: dict[str, Any] = {}
+        self._component_links: dict[str, str] = {}
+        self._component_triangle_counts: dict[str, int] = {}
+        self._component_appearance: dict[str, dict[str, str | float]] = {
+            str(key): dict(value)
+            for key, value in self.config.component_appearance.items()
+            if isinstance(value, dict)
+        }
+        self._component_select_callback: Any | None = None
 
         # Tool mesh state
         self._tool_meshes_group: Any | None = None
@@ -346,6 +403,8 @@ class UrdfScene(
     def cleanup(self) -> None:
         """Remove listeners registered by this scene."""
         simulation_state.remove_change_listener(self._update_simulation_view)
+        if self._client_id and _SCENES_BY_CLIENT.get(self._client_id) is self:
+            _SCENES_BY_CLIENT.pop(self._client_id, None)
 
     def show(self, scale_stls: float = 1.0, material=None, background_color=None):
         """Plot a nicegui 3D scene from loaded URDF.
@@ -383,6 +442,7 @@ class UrdfScene(
                         "mouseup",
                         "mouseleave",
                         "contextmenu",
+                        "click",
                     ],
                 )
                 .classes("w-full h-[66vh]")
@@ -596,13 +656,37 @@ class UrdfScene(
         click_type = getattr(e, "click_type", "")
         hits = getattr(e, "hits", []) or []
 
+        if click_type == "click":
+            selected_component = next(
+                (
+                    (getattr(hit, "object_name", "") or "").removeprefix(
+                        "robot-component:"
+                    )
+                    for hit in hits
+                    if (getattr(hit, "object_name", "") or "").startswith(
+                        "robot-component:"
+                    )
+                ),
+                None,
+            )
+            if selected_component and self._component_select_callback is not None:
+                try:
+                    self._component_select_callback(selected_component)
+                except (RuntimeError, ValueError, AttributeError) as exc:
+                    logger.debug("Component selection callback failed: %s", exc)
+            return
+
         if click_type == "mousedown":
             clicked_transform_controls = False
             clicked_ghost_part = False
+            selected_component: str | None = None
 
             for h in hits:
                 name = getattr(h, "object_name", "") or ""
                 object_id = getattr(h, "object_id", "") or ""
+
+                if name.startswith("robot-component:") and selected_component is None:
+                    selected_component = name.removeprefix("robot-component:")
 
                 if (
                     name.startswith("ghost:")
@@ -615,6 +699,12 @@ class UrdfScene(
                 if object_id.startswith("transformcontrols:"):
                     clicked_transform_controls = True
                     continue
+
+            if selected_component and self._component_select_callback is not None:
+                try:
+                    self._component_select_callback(selected_component)
+                except (RuntimeError, ValueError, AttributeError) as exc:
+                    logger.debug("Component selection callback failed: %s", exc)
 
             # While editing a target, clicking away does NOT auto-confirm.
             if self._editing_unified_target:
@@ -1900,6 +1990,137 @@ class UrdfScene(
                             r0z + ax[2] * angle * sign,
                         )
 
+    # --------- Robot component appearance ---------
+
+    def set_component_select_callback(self, callback: Any | None) -> None:
+        """Receive a component key when the operator clicks a robot mesh."""
+        self._component_select_callback = callback
+
+    def component_catalog(self) -> dict[str, str]:
+        """Return selectors for the robot, each link, and every mesh component."""
+        options: dict[str, str] = {"robot": "Entire robot"}
+        for link_name in _ROBOT_LINK_LABELS:
+            members = [
+                key for key, component_link in self._component_links.items()
+                if component_link == link_name
+            ]
+            if not members:
+                continue
+            link_label = _ROBOT_LINK_LABELS.get(link_name, link_name)
+            options[f"link:{link_name}"] = f"{link_label} · all components"
+            for key in sorted(members, key=lambda item: int(item.rsplit(":", 1)[1])):
+                index = int(key.rsplit(":", 1)[1])
+                triangles = self._component_triangle_counts.get(key, 0)
+                options[key] = (
+                    f"{link_label} · component {index:02d}"
+                    f" ({triangles:,} triangles)"
+                )
+        return options
+
+    def _component_members(self, selection: str) -> list[str]:
+        if selection == "robot":
+            return list(self._component_meshes)
+        if selection.startswith("link:"):
+            link_name = selection.split(":", 1)[1]
+            return [
+                key for key, component_link in self._component_links.items()
+                if component_link == link_name
+            ]
+        if selection in self._component_meshes:
+            return [selection]
+        return []
+
+    @staticmethod
+    def _valid_component_color(value: Any, fallback: str) -> str:
+        text = str(value or "").strip()
+        if len(text) == 7 and text.startswith("#"):
+            try:
+                int(text[1:], 16)
+                return text.lower()
+            except ValueError:
+                pass
+        return fallback
+
+    def _default_robot_material(self) -> tuple[str, float]:
+        if self._appearance_mode == RobotAppearanceMode.SIMULATOR:
+            return self.config.sim_color, self.config.sim_opacity
+        if self._appearance_mode == RobotAppearanceMode.EDITING:
+            return self.config.edit_color, self.config.edit_opacity
+        return self.config.material, 1.0
+
+    def _effective_component_material(self, key: str) -> tuple[str, float]:
+        default_color, default_opacity = self._default_robot_material()
+        override = self._component_appearance.get(key, {})
+        color = self._valid_component_color(override.get("color"), default_color)
+        try:
+            opacity = float(override.get("opacity", default_opacity))
+        except (TypeError, ValueError):
+            opacity = default_opacity
+        return color, max(0.1, min(1.0, opacity))
+
+    def component_appearance(self, selection: str) -> tuple[str, float, bool]:
+        """Return representative ``(color, opacity, mixed)`` for a selector."""
+        materials = [
+            self._effective_component_material(key)
+            for key in self._component_members(selection)
+        ]
+        if not materials:
+            color, opacity = self._default_robot_material()
+            return color, opacity, False
+        first = materials[0]
+        return first[0], first[1], any(material != first for material in materials[1:])
+
+    def component_appearance_overrides(self) -> dict[str, dict[str, str | float]]:
+        """Return a JSON-safe copy for persistent NiceGUI storage."""
+        return {key: dict(value) for key, value in self._component_appearance.items()}
+
+    def _refresh_component_materials(self, keys: Sequence[str] | None = None) -> None:
+        targets = list(keys) if keys is not None else list(self._component_meshes)
+        for key in targets:
+            mesh = self._component_meshes.get(key)
+            if mesh is None:
+                continue
+            color, opacity = self._effective_component_material(key)
+            mesh.material(color, opacity)
+
+        # A repaint can overwrite collision red and makes saved colors stale.
+        if targets:
+            repainted = {self._component_meshes[key] for key in targets if key in self._component_meshes}
+            if repainted & self._colliding_meshes:
+                self._colliding_meshes -= repainted
+                for mesh in repainted:
+                    self._collision_saved.pop(id(mesh), None)
+                self._last_collision_sig = None
+
+    def set_component_appearance(
+        self,
+        selection: str,
+        *,
+        color: str | None = None,
+        opacity: float | None = None,
+    ) -> None:
+        """Apply an appearance value to one part, one link, or the whole robot."""
+        members = self._component_members(selection)
+        if not members:
+            return
+        for key in members:
+            current = dict(self._component_appearance.get(key, {}))
+            if color is not None:
+                current["color"] = self._valid_component_color(
+                    color, self._default_robot_material()[0]
+                )
+            if opacity is not None:
+                current["opacity"] = max(0.1, min(1.0, float(opacity)))
+            self._component_appearance[key] = current
+        self._refresh_component_materials(members)
+
+    def reset_component_appearance(self, selection: str = "robot") -> None:
+        """Remove overrides for one selector and restore the active mode defaults."""
+        members = self._component_members(selection)
+        for key in members:
+            self._component_appearance.pop(key, None)
+        self._refresh_component_materials(members)
+
     def _apply_tool_engaged_color(self, engaged: bool) -> None:
         """Apply activated color to tool meshes based on engaged state."""
         if self._appearance_mode == RobotAppearanceMode.EDITING:
@@ -1937,13 +2158,7 @@ class UrdfScene(
         self._appearance_mode = mode
 
         body_color, moving_color, opacity = self._get_tool_colors()
-        arm_color = {
-            RobotAppearanceMode.LIVE: self.config.material,
-            RobotAppearanceMode.SIMULATOR: self.config.sim_color,
-        }.get(mode, self.config.edit_color)
-
-        for mesh in self._robot_meshes:
-            mesh.material(arm_color, opacity)
+        self._refresh_component_materials()
 
         for mesh in self._tool_body_meshes:
             mesh.material(body_color, opacity)
@@ -2087,51 +2302,73 @@ class UrdfScene(
                             self._draw_scene_cos(scale=0.05)
 
     def _plot_stls(self, link, scale: float = 1, material=None):
-        """Add all visual STLs from a link to the scene."""
+        """Add each disconnected physical component as its own scene mesh."""
         for visual in link.visuals:
-            obj = ui.scene.stl(
-                self._stl_to_url(visual.geometry.geometry.filename)
-            ).scale(scale)
-            if visual.origin is not None:
-                t, r = get_transl_and_rpy(visual.origin)
-                if any(v != 0 for v in t):
-                    obj.move(*t)
-                if any(v != 0 for v in r):
-                    obj.rotate(*r)
-            if material is not None:
-                obj.material(material)
-            # Tracked for simulator appearance changes.
-            self._robot_meshes.append(obj)
-            # Tracked by link name so reported colliding links can be tinted red.
-            self._link_to_meshes.setdefault(link.name, []).append(obj)
+            source_path = self._resolve_stl_path(visual.geometry.geometry.filename)
+            components = split_stl_components(source_path, self.component_meshes_dir)
+            existing_count = sum(
+                1 for component_link in self._component_links.values()
+                if component_link == link.name
+            )
+            for component in components:
+                component_index = existing_count + component.index
+                key = f"part:{link.name}:{component_index:02d}"
+                try:
+                    relative = component.path.relative_to(self.component_meshes_dir)
+                    url = os.path.join(
+                        self.component_meshes_url, str(relative).replace("\\", "/")
+                    )
+                except ValueError:
+                    url = self._stl_to_url(str(component.path))
 
-    def _stl_to_url(self, stl_path: str) -> str:
-        """Convert STL file path to URL, preferring _simplified variants if they exist."""
+                obj = (
+                    ui.scene.stl(url)
+                    .scale(scale)
+                    .with_name(f"robot-component:{key}")
+                )
+                if visual.origin is not None:
+                    t, r = get_transl_and_rpy(visual.origin)
+                    if any(v != 0 for v in t):
+                        obj.move(*t)
+                    if any(v != 0 for v in r):
+                        obj.rotate(*r)
+
+                self._component_meshes[key] = obj
+                self._component_links[key] = link.name
+                self._component_triangle_counts[key] = component.triangle_count
+                color, opacity = self._effective_component_material(key)
+                obj.material(color, opacity)
+
+                # Tracked for appearance and collision changes.
+                self._robot_meshes.append(obj)
+                self._link_to_meshes.setdefault(link.name, []).append(obj)
+
+    def _resolve_stl_path(self, stl_path: str) -> Path:
+        """Resolve an STL path and prefer its simplified sibling when available."""
         if stl_path.startswith("file://"):
             parsed = urlparse(stl_path)
             stl_path = url2pathname(parsed.path)
 
-        # Resolve relative to meshes_dir.
-        stl_full = Path(stl_path)
-        if stl_full.is_absolute():
-            try:
-                rel_path = stl_full.relative_to(self.meshes_dir)
-            except ValueError:
-                rel_path = Path(stl_full.name)
+        candidate = Path(stl_path)
+        if candidate.is_absolute():
+            full_path = candidate
         else:
-            rel_path = stl_full
+            full_path = self.meshes_dir / candidate
 
-        # Prefer a _simplified variant (e.g. part.STL -> part_simplified.stl),
-        # trying both the original extension case and lowercase .stl.
-        for ext in [rel_path.suffix, ".stl"]:
-            simplified_name = rel_path.stem + "_simplified" + ext
-            simplified_path = rel_path.with_name(simplified_name)
-            full_simplified = self.meshes_dir / simplified_path
+        for ext in [full_path.suffix, ".stl"]:
+            simplified = full_path.with_name(full_path.stem + "_simplified" + ext)
+            if simplified.exists():
+                logger.debug("Using simplified mesh: %s", simplified)
+                return simplified
+        return full_path
 
-            if full_simplified.exists():
-                rel_path = simplified_path
-                logger.debug("Using simplified mesh: %s", simplified_path)
-                break
+    def _stl_to_url(self, stl_path: str) -> str:
+        """Convert STL file path to URL, preferring _simplified variants if they exist."""
+        stl_full = self._resolve_stl_path(stl_path)
+        try:
+            rel_path = stl_full.relative_to(self.meshes_dir)
+        except ValueError:
+            rel_path = Path(stl_full.name)
 
         return os.path.join(self.meshes_url, str(rel_path).replace("\\", "/"))
 

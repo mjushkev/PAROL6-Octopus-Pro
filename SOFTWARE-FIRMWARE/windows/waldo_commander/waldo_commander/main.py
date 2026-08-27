@@ -214,7 +214,15 @@ async def initialize_urdf_scene() -> None:
         material=material_color,
         background_color=bg_color,
         sim_color=SceneColors.SIM_AMBER_HEX,
-        sim_opacity=0.9,
+        sim_opacity=1.0,
+        edit_opacity=0.75,
+        component_appearance=(
+            ng_app.storage.general.get("model/component_appearance", {})
+            if isinstance(
+                ng_app.storage.general.get("model/component_appearance", {}), dict
+            )
+            else {}
+        ),
         # Kinematic-mapping defaults are correct for PAROL6, so none are set here.
     )
 
@@ -259,6 +267,7 @@ async def initialize_urdf_scene() -> None:
     logger.debug("URDF scene initialized with joints: %s", ui_state.urdf_joint_names)
 
     readiness_state.signal_urdf_scene_ready()
+    control_panel.bind_appearance_scene(ui_state.urdf_scene)
 
     # Settings page may have built before the scene was ready.
     stored_tool = ng_app.storage.general.get("selected_tool")
