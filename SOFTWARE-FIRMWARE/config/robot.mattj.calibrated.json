@@ -12,7 +12,7 @@
     "feedback": "commanded_step_count_open_loop",
     "servo42c_mode": "CR_OPEN",
     "encoder_integration": false,
-    "initial_speed_cap_percent": 50,
+    "initial_speed_cap_percent": 80,
     "j1_home_mode_default": "MANUAL",
     "j1_auto_home_available": true,
     "home_order": ["J1", "J2", "J3", "J4", "J6", "J5"]

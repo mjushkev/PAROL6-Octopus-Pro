@@ -38,7 +38,7 @@ constexpr std::size_t kLineCapacity = 127U;
 constexpr std::uint8_t kDebounceSamples = 8U;
 constexpr std::uint32_t kHostMotionTimeoutMs = 2000U;
 constexpr std::uint32_t kP6b1WatchdogMs = 250U;
-constexpr std::uint32_t kP6b1ProfileCrc32c = 0xB39A8973U;
+constexpr std::uint32_t kP6b1ProfileCrc32c = 0x9F6BC640U;
 constexpr std::size_t kP6b1QueueCapacity = 512U;
 constexpr std::uint32_t kP6b1StatusPeriodMs = 20U;
 constexpr std::uint32_t kMotorHoldTimeoutMs = 2000U;
@@ -53,6 +53,7 @@ constexpr std::int32_t kHomeSeekMilliDegrees = 90000;
 constexpr std::int32_t kHomeInitialReleaseMilliDegrees = 30000;
 constexpr std::int32_t kHomeBackoffMilliDegrees = 5000;
 constexpr std::int32_t kHomeMarginMilliDegrees = 500;
+constexpr std::int32_t kHomeBoundaryGuardMilliDegrees = 2000;
 constexpr std::int32_t kHomeLatchMilliDegrees = 3000;
 constexpr std::int32_t kJ1HardMinimumMilliDegrees = -230000;
 constexpr std::int32_t kJ1HardMaximumMilliDegrees = 35000;
@@ -63,12 +64,12 @@ constexpr std::size_t kJ5Axis = 4U;
 constexpr std::int32_t kJ5PostHomeStandbyMilliDegrees = -130000;
 constexpr std::uint32_t kMinimumCoordinatedDurationMs = 500U;
 constexpr std::uint32_t kMaximumCoordinatedDurationMs = 60000U;
-// Owner-selected 50% commissioning stage. J1/J2 remain at their separately
-// validated Servo42C pulse ceilings; J3-J6 use 50% of the reviewed ceilings.
+// Owner-selected 80% commissioning stage. J1/J2 remain at their separately
+// validated Servo42C pulse ceilings; J3-J6 use 80% of the reviewed ceilings.
 constexpr std::array<float, 6> kCoordinatedMaximumDegreesPerSecond = {
-    4.0F, 1.0F, 22.5F, 22.5F, 22.5F, 22.5F};
+    4.0F, 1.0F, 36.0F, 36.0F, 36.0F, 36.0F};
 constexpr std::array<float, 6> kCoordinatedMaximumAccelerationDegreesPerSecond2 = {
-    8.0F, 2.5F, 60.0F, 60.0F, 60.0F, 60.0F};
+    8.0F, 2.5F, 96.0F, 96.0F, 96.0F, 96.0F};
 
 constexpr std::array<std::uint32_t, 6> kStepPins = {
     PF13, PG0, PF11, PG4, PF9, PC13};
@@ -615,11 +616,11 @@ void print_ready() {
                " board=OCTOPUS_PRO_V1_1_H723 joints=6 stops=8 adc=5 "
                "servo_signal=push_pull_3v3 servo_clock_max_hz=J1:500,J2:350 "
                "servo_pulse_us=1000 profiles=GENTLE,NORMAL,BRISK "
-               "j2_lift_accel_max_pulses_s2=900 j2_servo_ma=local_1600_initial "
+               "j2_lift_accel_max_pulses_s2=900 servo42c_ma=J1:2000,J2:2000 "
                "hold_speed_mdeg_s=3000-45000 hold_cap_mdeg=45000 "
                "motor_hold=host_supervised servo_hold=disabled "
                "coordinated_move=all_joints_shared_trapezoid "
-               "coordinated_speed_cap_percent=10 coordinated_hold=host_supervised "
+               "coordinated_speed_cap_percent=80 coordinated_hold=host_supervised "
                "home_sequence=J2,J3,J4,J6,J5 "
                "j5_post_home_standby_mdeg=-130000 "
                "mechanical_home_map=J2:PG10,J3:PG12,J5:PG9 "
@@ -1068,16 +1069,54 @@ bool home_sensor_active(std::size_t axis) {
   return stop_states[axis].stable == home_active_level[axis];
 }
 
+bool coordinated_home_sensor_guard_enabled(std::size_t axis) {
+  if (axis == 0U) return p6_j1_auto_home;
+  if (axis == 5U) return kJ6SensorHomeEnabled;
+  return axis <= kJ5Axis;
+}
+
+bool home_boundary_is_minimum(std::size_t axis) {
+  if (has_automatic_home_boundary(axis)) {
+    return automatic_home_boundary_is_minimum(axis);
+  }
+  return !home_is_logical_positive(axis);
+}
+
+bool position_is_near_home_boundary(std::size_t axis,
+                                    std::int32_t position_millidegrees) {
+  const auto& joint = calibration_record.joints[axis];
+  const std::int32_t boundary = home_boundary_is_minimum(axis)
+      ? joint.minimum_millidegrees
+      : joint.maximum_millidegrees;
+  return labs(position_millidegrees - boundary) <=
+         kHomeBoundaryGuardMilliDegrees;
+}
+
+bool home_sensor_transition_is_safe(std::size_t axis,
+                                    bool initial_sensor,
+                                    bool moving_positive,
+                                    bool axis_is_moving,
+                                    std::int32_t position_millidegrees) {
+  if (!axis_is_moving || !homed[axis] ||
+      !coordinated_home_sensor_guard_enabled(axis)) return false;
+  const bool moving_away = moving_positive != home_is_logical_positive(axis);
+  if (initial_sensor == home_active_level[axis] &&
+      !home_sensor_active(axis) && moving_away) return true;
+  if (initial_sensor != home_active_level[axis] &&
+      home_sensor_active(axis) && !moving_away &&
+      position_is_near_home_boundary(axis, position_millidegrees)) return true;
+  return false;
+}
+
 bool guarded_axis_sensor_changed(std::size_t axis) {
   if (stop_states[axis].stable == motion.initial_axis_sensor) return false;
 
-  // J2/J3 normally begin at the active home switch. Once referenced, permit
-  // exactly the active-to-clear transition while jogging away from home. Any
-  // transition toward home, or any later re-trigger, remains a motion abort.
-  const bool moving_away = motion.positive != home_is_logical_positive(axis);
-  if (has_automatic_home_boundary(axis) && homed[axis] && moving_away &&
-      motion.initial_axis_sensor == home_active_level[axis] &&
-      !home_sensor_active(axis)) {
+  // Permit leaving a referenced home switch, and permit entering it only in
+  // the commanded home direction within two degrees of the calibrated
+  // boundary. A switch transition anywhere else remains an immediate abort.
+  if (home_sensor_transition_is_safe(
+          axis, motion.initial_axis_sensor, motion.positive, true,
+          joint_position_millidegrees(axis))) {
     motion.initial_axis_sensor = stop_states[axis].stable;
     return false;
   }
@@ -1570,11 +1609,10 @@ bool reset_joint_calibration(std::size_t axis) {
 bool coordinated_sensor_change_is_safe(std::size_t axis) {
   if (stop_states[axis].stable == coordinated.initial_sensors[axis]) return true;
   const std::int32_t current = joint_position_millidegrees(axis);
-  const bool moving_positive = coordinated.targets_millidegrees[axis] > current;
-  const bool moving_away = moving_positive != home_is_logical_positive(axis);
-  if (has_automatic_home_boundary(axis) && homed[axis] && moving_away &&
-      coordinated.initial_sensors[axis] == home_active_level[axis] &&
-      !home_sensor_active(axis)) {
+  const std::int32_t delta = coordinated.targets_millidegrees[axis] - current;
+  if (home_sensor_transition_is_safe(
+          axis, coordinated.initial_sensors[axis], delta > 0, delta != 0,
+          current)) {
     coordinated.initial_sensors[axis] = stop_states[axis].stable;
     return true;
   }
@@ -1763,11 +1801,10 @@ bool p6_sensor_guards_safe(const parol6::p6b1::Setpoint& point) {
     if (stop_states[axis].stable == p6_initial_sensors[axis]) continue;
     const auto current = p6_logical_steps(
         axis, static_cast<std::int32_t>(steppers[axis]->currentPosition()));
-    const bool moving_positive = point.positions_steps[axis] >= current;
-    const bool moving_away = moving_positive != home_is_logical_positive(axis);
-    if (has_automatic_home_boundary(axis) && homed[axis] && moving_away &&
-        p6_initial_sensors[axis] == home_active_level[axis] &&
-        !home_sensor_active(axis)) {
+    const auto delta = point.positions_steps[axis] - current;
+    if (home_sensor_transition_is_safe(
+            axis, p6_initial_sensors[axis], delta > 0, delta != 0,
+            p6_steps_to_millidegrees(axis, current))) {
       p6_initial_sensors[axis] = stop_states[axis].stable;
       continue;
     }
@@ -1987,7 +2024,8 @@ void p6_handle_packet(const parol6::p6b1::PacketView& packet) {
   }
   if (p6_faults != parol6::p6b1::no_fault) {
     p6_send_error(packet.sequence,
-                  parol6::p6b1::ErrorCode::fault_latched);
+                  parol6::p6b1::ErrorCode::fault_latched,
+                  static_cast<std::uint16_t>(p6_faults & 0xFFFFU));
     return;
   }
 
@@ -2245,7 +2283,7 @@ void handle_line(char* command) {
       if (maximum_speed > kCoordinatedMaximumDegreesPerSecond[axis] ||
           acceleration >
               kCoordinatedMaximumAccelerationDegreesPerSecond2[axis]) {
-        error("coordinated_rate_exceeds_10_percent_cap");
+        error("coordinated_rate_exceeds_owner_cap");
         return;
       }
       if (!watchdog_ready || !preflight_axis(axis)) {

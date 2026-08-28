@@ -103,6 +103,56 @@ def test_transport_handshake_batches_motion_and_priority_stops(monkeypatch) -> N
     assert simulator.status().state is ControllerState.STOPPED
 
 
+def test_running_stream_refills_before_queue_can_underrun(monkeypatch) -> None:
+    profile_crc = crc32c(PROFILE.path.read_bytes())
+    simulator = BufferedControllerSimulator(profile_crc32c=profile_crc)
+    install_fake(monkeypatch, simulator)
+    transport = OctopusBufferedTransport(port="FAKE")
+    assert transport.connect()
+
+    affected = np.ones(8, dtype=np.uint8)
+    io = np.zeros(8, dtype=np.uint8)
+    gripper = np.zeros(6, dtype=np.int32)
+    for index in range(transport.BATCH_POINTS):
+        assert transport.write_frame(
+            np.full(6, index, dtype=np.int32),
+            np.full(6, 100, dtype=np.int32),
+            int(CommandCode.MOVE),
+            affected,
+            io,
+            0,
+            gripper,
+        )
+    assert simulator.status().queue_depth == transport.BATCH_POINTS
+
+    simulator.advance(transport.REFILL_POINTS * 10)
+    assert simulator.status().queue_depth == (
+        transport.BATCH_POINTS - transport.REFILL_POINTS
+    )
+    for offset in range(transport.REFILL_POINTS - 1):
+        assert transport.write_frame(
+            np.full(6, 20 + offset, dtype=np.int32),
+            np.full(6, 100, dtype=np.int32),
+            int(CommandCode.MOVE),
+            affected,
+            io,
+            0,
+            gripper,
+        )
+    assert simulator.status().queue_depth == 8
+    assert transport.write_frame(
+        np.full(6, 30, dtype=np.int32),
+        np.full(6, 100, dtype=np.int32),
+        int(CommandCode.MOVE),
+        affected,
+        io,
+        0,
+        gripper,
+    )
+    assert simulator.status().queue_depth == transport.BATCH_POINTS
+    assert simulator.status().faults is Fault.NONE
+
+
 def test_idle_frame_sends_watchdog_heartbeat(monkeypatch) -> None:
     profile_crc = crc32c(PROFILE.path.read_bytes())
     simulator = BufferedControllerSimulator(profile_crc32c=profile_crc)

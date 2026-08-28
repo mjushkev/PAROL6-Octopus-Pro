@@ -7,6 +7,8 @@ import numpy as np
 from parol6 import PAROL6_ROBOT
 from parol6.client.dry_run_client import DryRunRobotClient
 from parol6.hardware_profile import (
+    COMMISSIONING_MAX_DEG_S,
+    COMMISSIONING_MAX_DEG_S2,
     MODEL_ZERO_OFFSET_DEG,
     PROFILE,
     build_mapped_urdf,
@@ -33,6 +35,9 @@ def test_owner_profile_is_loaded_exactly() -> None:
     )
     np.testing.assert_array_equal(PROFILE.pulses_per_degree, [114, 356, 161, 36, 36, 89])
     np.testing.assert_allclose(PROFILE.standby_deg, [0, 0, 0, 0, -130, 0])
+    assert PROFILE.initial_speed_cap_percent == 80
+    np.testing.assert_allclose(COMMISSIONING_MAX_DEG_S, [4, 1, 36, 36, 36, 36])
+    np.testing.assert_allclose(COMMISSIONING_MAX_DEG_S2, [8, 2.5, 96, 96, 96, 96])
 
 
 def test_effective_step_conversion_matches_measured_profile() -> None:

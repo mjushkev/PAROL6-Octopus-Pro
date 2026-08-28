@@ -22,7 +22,7 @@ def test_home_returns_via_planned_move_when_referenced(
     import parol6.PAROL6_ROBOT as PAROL6_ROBOT
 
     standby = list(PAROL6_ROBOT.joint.standby_deg)
-    away = [45.0, -60.0, 150.0, 0.0, 30.0, 90.0]
+    away = [-20.0, 10.0, 10.0, 10.0, -150.0, 20.0]
     assert client.move_j(away, duration=2.0, wait=True) >= 0
 
     p = PAROL6_ROBOT.robot.fkine(np.radians(standby))[:3, 3]

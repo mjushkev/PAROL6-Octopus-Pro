@@ -3,8 +3,8 @@
 import asyncio
 import dataclasses
 import logging
-import time
 import math
+import time
 from functools import partial
 from typing import Any, Callable, ClassVar
 import importlib.resources as pkg_resources
@@ -465,7 +465,7 @@ class _ClickHoldHandler:
     def __init__(self, threshold_s: float, ui_client_fn: Callable[[], Any]) -> None:
         self._threshold_s = threshold_s
         self._ui_client_fn = ui_client_fn
-        self._hold_timers: dict[Any, ui.timer] = {}
+        self._hold_tasks: dict[Any, asyncio.Task[None]] = {}
         self._holding_active: set[Any] = set()
 
     def is_holding(self, key: Any) -> bool:
@@ -476,10 +476,10 @@ class _ClickHoldHandler:
         return bool(self._holding_active)
 
     def cancel_key(self, key: Any) -> None:
-        """Cancel any pending timer and clear hold state for a key."""
-        tm = self._hold_timers.pop(key, None)
-        if tm:
-            tm.active = False
+        """Cancel any pending hold and clear hold state for a key."""
+        task = self._hold_tasks.pop(key, None)
+        if task and not task.done():
+            task.cancel()
         self._holding_active.discard(key)
 
     async def on_change(
@@ -501,33 +501,38 @@ class _ClickHoldHandler:
             on_release: Called on release with was_holding=True/False for cleanup
         """
         if is_pressed:
-            # Cancel any existing timer for this key
-            tm_prev = self._hold_timers.pop(key, None)
-            if tm_prev:
-                tm_prev.active = False
+            self.cancel_key(key)
 
-            def _start_hold():
+            async def _start_hold_after_threshold() -> None:
+                try:
+                    await asyncio.sleep(self._threshold_s)
+                except asyncio.CancelledError:
+                    return
+                # The release path removes the key before cancelling. This
+                # identity check prevents an older press task from arming a
+                # newer press of the same button.
+                if self._hold_tasks.get(key) is not asyncio.current_task():
+                    return
                 self._holding_active.add(key)
-                on_hold_start()
-                tm = self._hold_timers.pop(key, None)
-                if tm:
-                    tm.active = False
+                ui_client = self._ui_client_fn()
+                if ui_client:
+                    with ui_client:
+                        on_hold_start()
+                else:
+                    on_hold_start()
 
-            ui_client = self._ui_client_fn()
-            if ui_client:
-                with ui_client:
-                    self._hold_timers[key] = ui.timer(
-                        self._threshold_s, _start_hold, once=True
-                    )
+            self._hold_tasks[key] = asyncio.create_task(
+                _start_hold_after_threshold()
+            )
             return
 
         # Release path
-        tm = self._hold_timers.pop(key, None)
+        task = self._hold_tasks.pop(key, None)
         was_holding = key in self._holding_active
 
-        if tm and tm.active:
-            # Timer still running → this was a quick click
-            tm.active = False
+        if task and not task.done():
+            # Threshold task still sleeping: this is exactly one quick click.
+            task.cancel()
             result = on_click()
             if asyncio.iscoroutine(result):
                 await result
@@ -540,9 +545,10 @@ class _ClickHoldHandler:
             on_release(True)
 
     def cleanup(self) -> None:
-        for tm in self._hold_timers.values():
-            tm.cancel()
-        self._hold_timers.clear()
+        for task in self._hold_tasks.values():
+            if not task.done():
+                task.cancel()
+        self._hold_tasks.clear()
         self._holding_active.clear()
 
 
@@ -841,10 +847,28 @@ class ControlPanel:
         try:
             pos_deg = ui_state.active_robot.joints.limits.position.deg
             if i < pos_deg.shape[0]:
-                return float(pos_deg[i, 0]), float(pos_deg[i, 1])
+                lo, hi = float(pos_deg[i, 0]), float(pos_deg[i, 1])
+                if math.isfinite(lo) and math.isfinite(hi) and lo < hi:
+                    return lo, hi
             return (-360.0, 360.0)
-        except (AttributeError, IndexError, AssertionError):
+        except (AttributeError, IndexError, AssertionError, TypeError, ValueError):
             return (-360.0, 360.0)
+
+    @staticmethod
+    def _safe_step_value(value: object, default: float = 1.0) -> float:
+        """Return a finite positive jog step while a number field is being edited.
+
+        NiceGUI briefly publishes ``None`` when the user clears/retypes the step
+        field.  Motion handlers and enabled bindings must remain deterministic
+        during that interval instead of crashing or disabling one direction.
+        """
+        try:
+            step = abs(float(value))
+        except (TypeError, ValueError):
+            step = default
+        if not math.isfinite(step) or step < 0.1:
+            step = default
+        return min(100.0, step)
 
     # ---- Cartesian helpers (icons, orientation, refresh) ----
 
@@ -1447,7 +1471,9 @@ class ControlPanel:
         async def on_click():
             speed = _norm_speed()
             accel = _norm_accel()
-            step = abs(float(waldoctl.commander.settings.jog.joint_step_deg))
+            step = self._safe_step_value(
+                waldoctl.commander.settings.jog.joint_step_deg
+            )
             try:
                 angles = list(waldoctl.commander.status.joints.angles.deg)
                 if len(angles) >= self._n_joints:
@@ -1551,8 +1577,8 @@ class ControlPanel:
 
         async def on_click():
             speed = _norm_speed()
-            step = max(
-                0.1, min(100.0, float(waldoctl.commander.settings.jog.joint_step_deg))
+            step = self._safe_step_value(
+                waldoctl.commander.settings.jog.joint_step_deg
             )
             try:
                 axis_letter = axis.rstrip("+-")
@@ -1863,6 +1889,33 @@ class ControlPanel:
         except Exception as e:
             logger.error("HOME failed: %s", e)
 
+    async def reset_to_default(self) -> None:
+        """Clear a software stop and return the robot to its calibrated standby.
+
+        If the robot is already referenced this is a normal planned move to
+        ``[0, 0, 0, 0, -130, 0]``.  If it is not referenced, the same HOME
+        command runs the owner-calibrated homing sequence first.
+        """
+        if waldoctl.commander.status.editing_mode:
+            if ui_state.urdf_scene:
+                ui_state.urdf_scene.apply_editing_home()
+            return
+        if not self._movement_allowed():
+            return
+        try:
+            self._clear_active_jog_inputs()
+            await self.client.reset()
+            await asyncio.sleep(0.15)
+            index = await self.client.home()
+            if index < 0:
+                raise RuntimeError("controller rejected the default-position move")
+            logger.info("RESET TO DEFAULT sent (standby J5=-130 degrees)")
+            motion_recorder.record_action("home")
+            ui.notify("Returning to calibrated default position", color="positive")
+        except Exception as e:
+            logger.error("RESET TO DEFAULT failed: %s", e)
+            ui.notify(f"Reset to default failed: {e}", color="negative")
+
     async def set_j1_home_mode(self, mode: str) -> None:
         """Persist and send the owner-specific J1 homing selection."""
         normalized = str(mode).strip().upper()
@@ -2146,8 +2199,11 @@ class ControlPanel:
                             def check_lower_limit(a, i=idx, lo=lo):
                                 if len(a) <= i:
                                     return False
-                                step = waldoctl.commander.settings.jog.joint_step_deg
-                                return a[i] - step >= lo
+                                try:
+                                    angle = float(a[i])
+                                except (TypeError, ValueError):
+                                    return False
+                                return math.isfinite(angle) and angle > lo + 1e-6
 
                             left_btn.bind_enabled_from(
                                 waldoctl.commander.status.joints,
@@ -2178,8 +2234,11 @@ class ControlPanel:
                             def check_upper_limit(a, i=idx, hi=hi):
                                 if len(a) <= i:
                                     return False
-                                step = waldoctl.commander.settings.jog.joint_step_deg
-                                return a[i] + step <= hi
+                                try:
+                                    angle = float(a[i])
+                                except (TypeError, ValueError):
+                                    return False
+                                return math.isfinite(angle) and angle < hi - 1e-6
 
                             right_btn.bind_enabled_from(
                                 waldoctl.commander.status.joints,
@@ -2537,11 +2596,23 @@ class ControlPanel:
         )
 
     def _build_action_row(self) -> None:
-        """Build the action row: Home, Robot/Sim toggle, gizmo controls, camera reset, step input."""
+        """Build the main robot actions and jog step input."""
         with ui.row().classes("cp-action-row gap-1 items-center w-full no-wrap"):
             ui.button(icon="home", on_click=self.send_home).props(
                 "dense round unelevated color=teal-6"
             ).tooltip("Home (H)").mark("btn-home")
+
+            (
+                ui.button(
+                    icon="settings_backup_restore", on_click=self.reset_to_default
+                )
+                .props("dense round unelevated color=blue-7")
+                .tooltip(
+                    "Reset software stop and return to default: "
+                    "J1-J4=0°, J5=-130°, J6=0°"
+                )
+                .mark("btn-reset-default")
+            )
 
             self._j1_home_mode = str(
                 app.storage.general.get("parol6/j1_home_mode", "MANUAL")

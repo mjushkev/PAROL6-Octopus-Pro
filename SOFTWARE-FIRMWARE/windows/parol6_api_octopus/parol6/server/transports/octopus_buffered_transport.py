@@ -40,7 +40,11 @@ logger = logging.getLogger(__name__)
 class OctopusBufferedTransport:
     """Buffered absolute-step transport with fail-closed capability gating."""
 
+    # Prime 120 ms before START, then refill every 40 ms. Waiting for another
+    # full 120 ms batch after motion had started left no timing margin on
+    # Windows and intermittently tripped the firmware's queue-underrun latch.
     BATCH_POINTS = 12
+    REFILL_POINTS = 4
     PERIOD_US = 10_000
     HANDSHAKE_TIMEOUT_S = 1.0
     HEARTBEAT_INTERVAL_S = 0.1
@@ -196,6 +200,10 @@ class OctopusBufferedTransport:
         self._connected = False
         self._pending.clear()
         self._started = False
+        self._last_sent_positions = None
+        self._last_status = None
+        self._queue_depth = 0
+        self._queue_capacity = 0
         self._last_tx_monotonic = 0.0
         if self.serial is not None:
             try:
@@ -273,7 +281,8 @@ class OctopusBufferedTransport:
         )
         self._pending.append(point)
         self._last_command = command
-        if len(self._pending) < self.BATCH_POINTS:
+        flush_threshold = self.REFILL_POINTS if self._started else self.BATCH_POINTS
+        if len(self._pending) < flush_threshold:
             return True
         return self._flush_pending()
 

@@ -4,6 +4,22 @@
 
 ### Added
 
+- Commander firmware `1.0.0-commander-rc6` and matching host profile raise
+  J3-J6 to the owner-requested 80% reviewed speed/acceleration stage while
+  retaining the independently proven J1/J2 Servo42C caps. Buffered USB motion
+  now starts with 120 ms of lookahead and refills every 40 ms, eliminating the
+  zero-margin queue underruns seen during jogging. Calibrated home switches may
+  clear while moving away or activate within two degrees of their home boundary;
+  every other sensor transition remains fail-closed. Firmware fault replies now
+  include the latched fault bitmask for diagnosis.
+- Commander adds a dedicated Reset-to-Default control, safely normalizes an
+  in-progress/blank jog step field, and keeps each jog direction enabled until
+  that joint is actually at its calibrated limit. Click/hold classification now
+  uses a cancellable monotonic task, so each quick press produces exactly one
+  step and a held press streams continuously until release. The default action
+  clears a software stop and returns to `[0, 0, 0, 0, -130, 0]`, running the
+  calibrated homing sequence first when the robot is not referenced.
+
 - Commander jog/step reliability repair: P6B1 timing-derived rates are now
   clamped to the exact calibrated firmware limits, so integer step sampling
   cannot turn a valid step into `INVALID_PAYLOAD`, release motor hold, and

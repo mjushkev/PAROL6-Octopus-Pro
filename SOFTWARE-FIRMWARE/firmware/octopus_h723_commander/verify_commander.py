@@ -41,7 +41,7 @@ def verify_firmware(source, target, env):
     protocol = (project_dir / "src" / "p6b1_protocol.cpp").read_text(encoding="utf-8")
     protocol_header = (project_dir / "include" / "p6b1_protocol.hpp").read_text(encoding="utf-8")
     platform_config = (project_dir / "platformio.ini").read_text(encoding="utf-8")
-    if 'PAROL6_FIRMWARE_VERSION="1.0.0-commander-rc5"' not in platform_config:
+    if 'PAROL6_FIRMWARE_VERSION="1.0.0-commander-rc6"' not in platform_config:
         raise RuntimeError("Commander version macro is not pinned")
     for invariant in (
         "0U, 0U, 700U, 700U, 700U, 450U", "kMaximumJogMilliDegrees = 10000",
@@ -60,7 +60,7 @@ def verify_firmware(source, target, env):
         "kCoordinatedMaximumAccelerationDegreesPerSecond2",
         "COORDINATED_MOVE_VERIFIED", "RELEASE_COORDINATED_HOLD_VERIFIED",
         "PAROL6_COORDINATED_STARTED", "PAROL6_COORDINATED_DONE",
-        "coordinated_rate_exceeds_10_percent_cap",
+        "coordinated_rate_exceeds_owner_cap",
         "kHomeSeekMilliDegrees = 90000", "sensor_not_found_90deg",
         "kHomeInitialReleaseMilliDegrees = 30000", "sensor_stuck_active_30deg",
         "j4_sensor_stuck_active_30deg", "FINAL_CLEAR_POSITIVE",
@@ -68,6 +68,9 @@ def verify_firmware(source, target, env):
         "POST_HOME_STANDBY_MINUS_130", "j5_sensor_failed_to_clear",
         "j5_sensor_retriggered_during_standby", "j5_sensor_stuck_active_30deg",
         "automatic_home_boundary_is_minimum",
+        "kHomeBoundaryGuardMilliDegrees = 2000",
+        "home_sensor_transition_is_safe",
+        "position_is_near_home_boundary",
         "INTERFACE_VERIFIED", "SAVE_CALIBRATION_VERIFIED", "HOLD_POSITION_VERIFIED",
         "hold_release_rejected", "disable_all();",
         "handoff_motor_hold_to_motion", "result=handoff driver_disabled=0",
@@ -83,7 +86,7 @@ def verify_firmware(source, target, env):
         "has_automatic_home_boundary", "apply_automatic_home_boundary",
         "guarded_axis_sensor_changed", "home_boundary_is_automatic",
         "PG6, PG10, PG12, PG11, PG9, PG13",
-        "kP6b1ProfileCrc32c = 0xB39A8973U",
+        "kP6b1ProfileCrc32c = 0x9F6BC640U",
         "kP6b1QueueCapacity = 512U",
         "kP6b1WatchdogMs = 250U",
         "configure_owner_servo_interfaces",

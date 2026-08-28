@@ -46,8 +46,8 @@ def _assert_frozen(client: RobotClient, target: list[float]) -> list[float]:
 
 
 def test_stop_cancels_motion_and_stays_enabled(client: RobotClient, server_proc):
-    away = [45.0, -60.0, 150.0, 0.0, 30.0, 90.0]
-    queued = [90.0, -45.0, 120.0, 10.0, 20.0, 90.0]
+    away = [-20.0, 10.0, 10.0, 10.0, -150.0, 20.0]
+    queued = [-10.0, 15.0, 15.0, 15.0, -140.0, 30.0]
     start = client.angles()
     assert start is not None
 
@@ -67,7 +67,7 @@ def test_stop_cancels_motion_and_stays_enabled(client: RobotClient, server_proc)
 
 
 def test_estop_latches_until_reset(client: RobotClient, server_proc):
-    away = [45.0, -60.0, 150.0, 0.0, 30.0, 90.0]
+    away = [-20.0, 10.0, 10.0, 10.0, -150.0, 20.0]
     start = client.angles()
     assert start is not None
 

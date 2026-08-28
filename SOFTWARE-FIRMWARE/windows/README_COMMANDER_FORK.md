@@ -51,7 +51,7 @@ The launcher now has a hardware acceptance mode:
 It only connects to Commander firmware that proves the P6B1 capabilities and
 the exact owner-profile checksum. Commissioning firmware 0.9.1 and official
 upstream firmware are rejected before any motion command is accepted. The
-firmware keeps an independent 50% J3-J6 speed cap, lower protected J1/J2 Servo42C caps, calibrated joint limits, sensor
+firmware keeps an independent 80% J3-J6 speed cap, lower protected J1/J2 Servo42C caps, calibrated joint limits, sensor
 guards, queue watchdog, CRC and sequence checks, graceful finish-and-hold, and
 priority STOP.
 

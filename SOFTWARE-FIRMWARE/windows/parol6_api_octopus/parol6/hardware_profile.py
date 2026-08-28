@@ -22,7 +22,7 @@ from scipy.spatial.transform import Rotation
 PROFILE_SCHEMA = "parol6.production-calibration.v1"
 EXPECTED_ROBOT_ID = "PAROL6-MATTJ-001"
 EXPECTED_BOARD = "BTT_OCTOPUS_PRO_V1_1_H723ZE"
-BUNDLED_PROFILE_SHA256 = "5eb94dc1c1e3e0693488b989b6d1ac021f8c9ed31dd3710330f9879b0577a584"
+BUNDLED_PROFILE_SHA256 = "f9cd6edd6352d63a907e649540ead50ce08728db8bd254c65568378d428fecec"
 
 # q_urdf = MODEL_SIGN * q_owner + MODEL_ZERO_OFFSET_DEG
 # J1 assumes the owner-selected manual zero is the standard 90-degree standby.
@@ -35,10 +35,10 @@ MODEL_ZERO_OFFSET_DEG = np.array(
 )
 MODEL_MAPPING_STATUS = "derived_pending_physical_pose_validation"
 
-# Owner-selected 50% commissioning stage. J1/J2 remain capped at their
-# separately proven Servo42C pulse rates; J3-J6 use 50% of the reviewed rates.
-COMMISSIONING_MAX_DEG_S = np.array([4.0, 1.0, 22.5, 22.5, 22.5, 22.5])
-COMMISSIONING_MAX_DEG_S2 = np.array([8.0, 2.5, 60.0, 60.0, 60.0, 60.0])
+# Owner-selected 80% commissioning stage. J1/J2 remain capped at their
+# separately proven Servo42C pulse rates; J3-J6 use 80% of the reviewed rates.
+COMMISSIONING_MAX_DEG_S = np.array([4.0, 1.0, 36.0, 36.0, 36.0, 36.0])
+COMMISSIONING_MAX_DEG_S2 = np.array([8.0, 2.5, 96.0, 96.0, 96.0, 96.0])
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,7 @@ class HardwareProfile:
     robot_id: str
     board: str
     device_uid: str
+    initial_speed_cap_percent: int
     j1_home_mode_default: str
     j1_auto_home_available: bool
     home_order: tuple[str, ...]
@@ -126,11 +127,15 @@ def load_profile(path: Path | None = None) -> HardwareProfile:
         raise ValueError("J6 must remain cable-limited to -180..180 degrees")
 
     motion = data.get("motion_model", {})
+    speed_cap = int(motion.get("initial_speed_cap_percent", 0))
+    if not 1 <= speed_cap <= 100:
+        raise ValueError("initial_speed_cap_percent must be in 1..100")
     return HardwareProfile(
         path=source,
         robot_id=data["robot_id"],
         board=controller["board"],
         device_uid=controller.get("device_uid", ""),
+        initial_speed_cap_percent=speed_cap,
         j1_home_mode_default=motion.get("j1_home_mode_default", "MANUAL"),
         j1_auto_home_available=bool(motion.get("j1_auto_home_available", False)),
         home_order=tuple(motion.get("home_order", [])),
