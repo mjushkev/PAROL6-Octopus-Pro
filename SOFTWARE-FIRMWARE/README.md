@@ -14,14 +14,14 @@ records every pulse conversion, direction, home behavior, and joint limit.
 J1 defaults to a temporary manual zero until its sensor is repaired; automatic
 J1 sensor homing remains available as an operator-selected mode.
 
-`0.9.1-motion-rc` preserves the calibration firmware's
-home state machine and flash records, and adds a token-bound, synchronized
-six-joint move with an 80% J3-J6 speed/acceleration ceiling, protected J1/J2 Servo42C caps, firmware soft
+Commander RC7 preserves the calibration firmware's home state machine and
+flash records, and adds a token-bound, synchronized six-joint move with an
+all-joint 80% speed/acceleration envelope, firmware soft
 limits, switch guards, host timeout, supervised pose hold, and a guarded J5
-post-home move from the 0° latch position to −130° standby. The owner reports
-the installed image, homing, joint motion, synchronized motion and J5 standby
-behavior working. Formal loaded thermal/repeatability/endurance evidence is
-still required. The rollback image remains `0.8.12-calibration-rc`.
+post-home move from the 0° latch position to −130° standby. The 80% stage is
+36 deg/s and 96 deg/s^2 on J1-J6; physical loaded thermal, repeatability, and
+endurance acceptance is still required. The known-good rollback image remains
+`0.9.1-motion-rc`.
 
 The hosted Web Serial app now opens on the Stage 3 Robot Commander with
 per-joint home/jog controls, a persistent Manual/Auto J1 home switch, dry-run

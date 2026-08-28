@@ -21,6 +21,7 @@ from tests.helpers.wait import (
     teleport_to_jog_pose,
     wait_for_motion_stable,
     wait_for_motion_start,
+    wait_for_value_change,
     wait_for_app_ready,
 )
 
@@ -43,7 +44,11 @@ async def test_joint_jog_button_sends_jog_j(user: User) -> None:
 
     # Click J1 plus button and wait for motion
     await simulate_click(user, "btn-j1-plus")
-    await wait_for_motion_start()
+    await wait_for_value_change(
+        lambda: float(waldoctl.commander.status.joints.angles[0]),
+        baseline=float(initial_j1),
+        timeout_s=5.0,
+    )
 
     # Wait for motion to stabilize
     final_j1 = await wait_for_motion_stable(
@@ -112,7 +117,11 @@ async def test_joint_jog_moves_both_directions(user: User) -> None:
 
     # Click J1 plus button (single click, not hold)
     await simulate_click(user, "btn-j1-plus")
-    await wait_for_motion_start()
+    await wait_for_value_change(
+        lambda: float(waldoctl.commander.status.joints.angles[0]),
+        baseline=float(initial_j1),
+        timeout_s=5.0,
+    )
     final_j1 = await wait_for_motion_stable(
         lambda: waldoctl.commander.status.joints.angles[0]
     )
@@ -129,7 +138,11 @@ async def test_joint_jog_moves_both_directions(user: User) -> None:
 
     # Click J1 minus button (mousedown/mouseup pair — jog buttons don't listen for raw click)
     await simulate_click(user, "btn-j1-minus")
-    await wait_for_motion_start()
+    await wait_for_value_change(
+        lambda: float(waldoctl.commander.status.joints.angles[0]),
+        baseline=float(initial_j1),
+        timeout_s=5.0,
+    )
     final_j1 = await wait_for_motion_stable(
         lambda: waldoctl.commander.status.joints.angles[0]
     )
@@ -152,6 +165,9 @@ async def test_cartesian_jog_all_axes(user: User) -> None:
     await wait_for_app_ready()
     await enable_sim(user)
     await ensure_robot_ready_for_motion()
+    from waldo_commander.state import ui_state
+
+    await teleport_to_jog_pose(ui_state.control_panel.client)
 
     # Switch to Cartesian Jog tab
     user.find("Cartesian Jog").click()
@@ -170,7 +186,11 @@ async def test_cartesian_jog_all_axes(user: User) -> None:
     initial_z = float(waldoctl.commander.status.pose.z)
 
     await simulate_click(user, "axis-zplus")
-    await wait_for_motion_start()
+    await wait_for_value_change(
+        lambda: float(waldoctl.commander.status.pose.z),
+        baseline=initial_z,
+        timeout_s=5.0,
+    )
     final_z = await wait_for_motion_stable(
         lambda: float(waldoctl.commander.status.pose.z), tolerance=0.1
     )
@@ -188,7 +208,11 @@ async def test_cartesian_jog_all_axes(user: User) -> None:
     initial_z = float(waldoctl.commander.status.pose.z)
 
     await simulate_click(user, "axis-zminus")
-    await wait_for_motion_start()
+    await wait_for_value_change(
+        lambda: float(waldoctl.commander.status.pose.z),
+        baseline=initial_z,
+        timeout_s=5.0,
+    )
     final_z = await wait_for_motion_stable(
         lambda: float(waldoctl.commander.status.pose.z), tolerance=0.1
     )
@@ -204,7 +228,11 @@ async def test_cartesian_jog_all_axes(user: User) -> None:
     initial_rz = float(waldoctl.commander.status.pose.rz)
 
     await simulate_click(user, "axis-rzplus")
-    await wait_for_motion_start()
+    await wait_for_value_change(
+        lambda: float(waldoctl.commander.status.pose.rz),
+        baseline=initial_rz,
+        timeout_s=5.0,
+    )
     final_rz = await wait_for_motion_stable(
         lambda: float(waldoctl.commander.status.pose.rz), tolerance=0.1
     )
@@ -242,7 +270,11 @@ async def test_joint_jog_one_degree_step(user: User) -> None:
 
     # Single click on J1 plus
     await simulate_click(user, "btn-j1-plus")
-    await wait_for_motion_start()
+    await wait_for_value_change(
+        lambda: float(waldoctl.commander.status.joints.angles[0]),
+        baseline=float(initial_j1),
+        timeout_s=5.0,
+    )
     final_j1 = await wait_for_motion_stable(
         lambda: waldoctl.commander.status.joints.angles[0],
         timeout_s=5.0,
@@ -266,6 +298,7 @@ async def test_cartesian_jog_one_mm_step(user: User) -> None:
     await wait_for_app_ready()
     await enable_sim(user)
     await ensure_robot_ready_for_motion()
+    await teleport_to_jog_pose(ui_state.control_panel.client)
 
     # Set motion profile to TOPPRA (use the app's own client, not session_client)
     await ui_state.control_panel.client.select_profile("TOPPRA")
@@ -284,13 +317,38 @@ async def test_cartesian_jog_one_mm_step(user: User) -> None:
 
     # Single click on Z plus
     await simulate_click(user, "axis-zplus")
-    await wait_for_motion_start()
+    await wait_for_value_change(
+        lambda: float(waldoctl.commander.status.pose.z),
+        baseline=initial_z,
+        timeout_s=5.0,
+    )
     final_z = await wait_for_motion_stable(
         lambda: float(waldoctl.commander.status.pose.z), timeout_s=5.0, stable_ticks=20
     )
 
     delta = final_z - initial_z
     assert 0.9 <= delta <= 1.1, f"Expected Z to move +1.0mm±0.1mm, moved {delta:.4f}mm"
+
+
+@pytest.mark.integration
+async def test_reset_to_default_uses_cartesian_ready_owner_pose(user: User) -> None:
+    """Reset-to-Default must leave the near-singular standby pose."""
+    from parol6.hardware_profile import PROFILE
+    from waldo_commander.state import ui_state
+
+    await user.open("/")
+    await wait_for_app_ready()
+    await enable_sim(user)
+    await ensure_robot_ready_for_motion()
+
+    await ui_state.control_panel.reset_to_default()
+    await wait_for_motion_stable(
+        lambda: float(waldoctl.commander.status.joints.angles[1]),
+        timeout_s=10.0,
+        stable_ticks=30,
+    )
+    actual = list(waldoctl.commander.status.joints.angles.deg)
+    assert actual == pytest.approx(PROFILE.default_work_pose_deg, abs=0.15)
 
 
 @pytest.mark.skipif(
@@ -369,6 +427,7 @@ async def test_cartesian_jog_rapid_clicks(user: User) -> None:
     await wait_for_app_ready()
     await enable_sim(user)
     await ensure_robot_ready_for_motion()
+    await teleport_to_jog_pose(ui_state.control_panel.client)
 
     # Set motion profile to TOPPRA (use the app's own client, not session_client)
     await ui_state.control_panel.client.select_profile("TOPPRA")
@@ -482,6 +541,7 @@ async def test_translation_frame_toggle_changes_jog_frame(
     await ensure_robot_ready_for_motion()
 
     cp = ui_state.control_panel
+    await teleport_to_jog_pose(cp.client)
     moves: list[str] = []
     jogs: list[str] = []
     real_move_l = cp.client.move_l
@@ -544,7 +604,6 @@ async def test_translation_frame_toggle_changes_jog_frame(
         await wait_for_motion_stable(lambda: float(waldoctl.commander.status.pose.z))
         await click_axis("axis-zplus")
         assert moves[-1] == "TRF", f"expected TRF move_l, got {moves}"
-        await wait_for_motion_start()
         await wait_for_motion_stable(lambda: float(waldoctl.commander.status.pose.z))
 
         # Tool frame: streamed hold sends jog_l("TRF", ...)
@@ -586,8 +645,8 @@ async def test_jog_arrow_inversion_flips_button_direction_and_label(user: User) 
     user.find(marker="tab-cartesian").click()
     await asyncio.sleep(0)
 
-    # The homed standby pose is a wrist singularity (J5 = 0) where the X-step
-    # move_l can fail IK partway; jog from the singularity-free pose instead.
+    # The owner standby pose is close to a wrist singularity where the X-step
+    # can fail IK; jog from the singularity-free pose instead.
     await teleport_to_jog_pose(cp.client)
 
     waldoctl.commander.settings.jog.joint_step_deg = 5.0
@@ -602,7 +661,11 @@ async def test_jog_arrow_inversion_flips_button_direction_and_label(user: User) 
         lambda: float(waldoctl.commander.status.pose.x), tolerance=0.05, stable_ticks=30
     )
     await simulate_click(user, "axis-xplus")
-    await wait_for_motion_start()
+    await wait_for_value_change(
+        lambda: float(waldoctl.commander.status.pose.x),
+        baseline=initial_x,
+        timeout_s=5.0,
+    )
     # The 5mm move_l has a sub-tolerance creep phase before its main ramp, so
     # value-stability would trigger early — wait for the action to finish.
     for _ in range(100):
@@ -643,7 +706,11 @@ async def test_jog_arrow_inversion_flips_button_direction_and_label(user: User) 
             stable_ticks=30,
         )
         await simulate_click(user, "axis-xminus")
-        await wait_for_motion_start()
+        await wait_for_value_change(
+            lambda: float(waldoctl.commander.status.pose.x),
+            baseline=initial_x,
+            timeout_s=5.0,
+        )
         for _ in range(100):
             if waldoctl.commander.status.action.state == ActionState.IDLE:
                 break
@@ -678,8 +745,8 @@ async def test_inversion_mid_hold_releases_captured_axis(
     user.find(marker="tab-cartesian").click()
     await asyncio.sleep(0)
 
-    # Stream from the singularity-free pose: jog_l steps from the homed
-    # standby pose (J5 = 0) can fail IK and wedge the shared controller.
+    # Stream from the singularity-free pose: jog_l steps from the owner
+    # standby can fail IK and wedge the shared controller.
     await teleport_to_jog_pose(cp.client)
 
     jogs: list = []

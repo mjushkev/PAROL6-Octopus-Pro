@@ -7,7 +7,7 @@ $project = Join-Path $repoRoot "firmware\octopus_h723_commander"
 $python = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
 $pioPackages = Join-Path (Split-Path -Parent $repoRoot) "tmp\pio-env\Lib\site-packages"
 $elf = Join-Path $project ".pio\build\octopus_h723_commander\firmware.elf"
-$release = Join-Path $repoRoot "dist\commander-1.0.0-rc6"
+$release = Join-Path $repoRoot "dist\commander-1.0.0-rc7"
 
 if (-not (Test-Path -LiteralPath $python)) {
     throw "The pinned Python runtime is missing: $python"
@@ -18,7 +18,7 @@ if (-not (Test-Path -LiteralPath $pioPackages)) {
 
 $env:PLATFORMIO_CORE_DIR = Join-Path $env:USERPROFILE ".platformio"
 $env:PYTHONPATH = $pioPackages
-& $python -m platformio run --project-dir $project --target checkprogsize
+& $python -m platformio run --project-dir $project --target checkprogsize --jobs 1
 if ($LASTEXITCODE -ne 0) { throw "Commander firmware compile/verification failed" }
 
 New-Item -ItemType Directory -Path $release -Force | Out-Null

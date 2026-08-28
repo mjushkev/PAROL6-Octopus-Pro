@@ -25,11 +25,14 @@ constexpr std::uint32_t kTmcBaud = 115200U;
 constexpr std::array<std::uint16_t, 6> kRunCurrentMa = {
     0U, 0U, 700U, 700U, 700U, 450U};
 constexpr std::uint16_t kMicrosteps = 16U;
-// J2 is gravity-loaded. Its Servo42C current is configured locally, so the
-// Octopus improves lift margin by demanding less speed and acceleration.
-constexpr std::array<float, 2> kServoMaximumPulseRate = {500.0F, 350.0F};
-constexpr float kJ2MaximumPulseAcceleration = 900.0F;
-constexpr std::uint16_t kServoPulseWidthUs = 1000U;
+// J1/J2 Servo42Cs run MStep=32 in CR_OPEN. These pulse ceilings map the same
+// 36 deg/s, 96 deg/s^2 owner envelope used by J3-J6 into the measured
+// pulses-per-degree values (J1=114, J2=356). An 8 us STEP pulse is comfortably
+// below the fastest 12.816 kHz command while remaining conservative for the
+// opto-less 3.3 V logic input.
+constexpr std::array<float, 2> kServoMaximumPulseRate = {4104.0F, 12816.0F};
+constexpr float kJ2MaximumPulseAcceleration = 34176.0F;
+constexpr std::uint16_t kServoPulseWidthUs = 8U;
 constexpr std::uint16_t kTmcPulseWidthUs = 8U;
 constexpr float kSenseResistorOhms = 0.11F;
 constexpr std::uint8_t kTmcAddress = 0U;
@@ -38,7 +41,7 @@ constexpr std::size_t kLineCapacity = 127U;
 constexpr std::uint8_t kDebounceSamples = 8U;
 constexpr std::uint32_t kHostMotionTimeoutMs = 2000U;
 constexpr std::uint32_t kP6b1WatchdogMs = 250U;
-constexpr std::uint32_t kP6b1ProfileCrc32c = 0x9F6BC640U;
+constexpr std::uint32_t kP6b1ProfileCrc32c = 0x9B9E50DAU;
 constexpr std::size_t kP6b1QueueCapacity = 512U;
 constexpr std::uint32_t kP6b1StatusPeriodMs = 20U;
 constexpr std::uint32_t kMotorHoldTimeoutMs = 2000U;
@@ -64,12 +67,12 @@ constexpr std::size_t kJ5Axis = 4U;
 constexpr std::int32_t kJ5PostHomeStandbyMilliDegrees = -130000;
 constexpr std::uint32_t kMinimumCoordinatedDurationMs = 500U;
 constexpr std::uint32_t kMaximumCoordinatedDurationMs = 60000U;
-// Owner-selected 80% commissioning stage. J1/J2 remain at their separately
-// validated Servo42C pulse ceilings; J3-J6 use 80% of the reviewed ceilings.
+// Owner-selected 80% motion stage for all joints: 80% of the reviewed
+// 45 deg/s and 120 deg/s^2 reference envelope.
 constexpr std::array<float, 6> kCoordinatedMaximumDegreesPerSecond = {
-    4.0F, 1.0F, 36.0F, 36.0F, 36.0F, 36.0F};
+    36.0F, 36.0F, 36.0F, 36.0F, 36.0F, 36.0F};
 constexpr std::array<float, 6> kCoordinatedMaximumAccelerationDegreesPerSecond2 = {
-    8.0F, 2.5F, 96.0F, 96.0F, 96.0F, 96.0F};
+    96.0F, 96.0F, 96.0F, 96.0F, 96.0F, 96.0F};
 
 constexpr std::array<std::uint32_t, 6> kStepPins = {
     PF13, PG0, PF11, PG4, PF9, PC13};
@@ -614,13 +617,15 @@ void apply_hold_profile(std::size_t axis, std::int32_t speed_mdeg_per_second,
 void print_ready() {
   Serial.print("PAROL6_MOTION_RC_READY version=" PAROL6_FIRMWARE_VERSION
                " board=OCTOPUS_PRO_V1_1_H723 joints=6 stops=8 adc=5 "
-               "servo_signal=push_pull_3v3 servo_clock_max_hz=J1:500,J2:350 "
-               "servo_pulse_us=1000 profiles=GENTLE,NORMAL,BRISK "
-               "j2_lift_accel_max_pulses_s2=900 servo42c_ma=J1:2000,J2:2000 "
+               "servo_signal=push_pull_3v3 servo_clock_max_hz=J1:4104,J2:12816 "
+               "servo_pulse_us=8 profiles=GENTLE,NORMAL,BRISK "
+               "j2_accel_max_pulses_s2=34176 "
+               "servo42c_recommended_ma=J1:1600,J2:1800 servo42c_max_ma=2000 "
                "hold_speed_mdeg_s=3000-45000 hold_cap_mdeg=45000 "
                "motor_hold=host_supervised servo_hold=disabled "
                "coordinated_move=all_joints_shared_trapezoid "
-               "coordinated_speed_cap_percent=80 coordinated_hold=host_supervised "
+               "coordinated_speed_cap_percent=80 all_joint_speed_cap=1 "
+               "coordinated_hold=host_supervised "
                "home_sequence=J2,J3,J4,J6,J5 "
                "j5_post_home_standby_mdeg=-130000 "
                "mechanical_home_map=J2:PG10,J3:PG12,J5:PG9 "

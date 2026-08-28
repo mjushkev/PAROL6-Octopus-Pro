@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $apiRoot = Join-Path $PSScriptRoot "parol6_api_octopus"
 $commanderRoot = Join-Path $PSScriptRoot "waldo_commander"
+$niceguiPatch = Join-Path $PSScriptRoot "runtime_patches\patch_nicegui_scene.py"
 $runtimeRoot = Join-Path $env:USERPROFILE ".cache\parol6-waldo"
 $venvPython = Join-Path $runtimeRoot ".venv\Scripts\python.exe"
 
@@ -45,6 +46,8 @@ if ($LASTEXITCODE -ne 0) { throw "Could not install the portable kinematics depe
 if ($LASTEXITCODE -ne 0) { throw "Could not install the Octopus PAROL6 backend." }
 & $venvPython -m pip install --disable-pip-version-check --editable $commanderRoot
 if ($LASTEXITCODE -ne 0) { throw "Could not install Waldo Commander." }
+& $venvPython $niceguiPatch
+if ($LASTEXITCODE -ne 0) { throw "Could not patch the pinned NiceGUI TransformControls runtime." }
 
 $profile = Join-Path $projectRoot "config\robot.mattj.calibrated.json"
 $env:PAROL6_COLLISION_CHECK = "0"

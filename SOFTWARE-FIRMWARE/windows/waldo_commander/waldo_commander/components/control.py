@@ -13,6 +13,7 @@ import numpy as np
 
 from nicegui import ui, app, Client
 import waldoctl
+from parol6.hardware_profile import PROFILE
 from waldoctl import ElectricGripperTool, GripperTool, RobotClient, ToggleMode, ToolSpec
 from waldoctl.types import Axis
 
@@ -640,6 +641,11 @@ class ControlPanel:
         self.CLICK_HOLD_THRESHOLD_S: float = CLICK_HOLD_THRESHOLD_S
         self._joint_click_hold: _ClickHoldHandler | None = None
         self._cart_click_hold: _ClickHoldHandler | None = None
+        # Quick presses can arrive while the previous step is still moving.
+        # Serialize them so every click is based on the completed pose instead
+        # of overwriting the same stale relative target.
+        self._joint_step_lock = asyncio.Lock()
+        self._cart_step_lock = asyncio.Lock()
 
         # Settings content for cleanup
         self._settings_content: "SettingsContent | None" = None
@@ -1469,21 +1475,30 @@ class ControlPanel:
             ui_state.joint_jog_timer.active = bool(any_pressed)
 
         async def on_click():
-            speed = _norm_speed()
-            accel = _norm_accel()
-            step = self._safe_step_value(
-                waldoctl.commander.settings.jog.joint_step_deg
-            )
             try:
-                angles = list(waldoctl.commander.status.joints.angles.deg)
-                if len(angles) >= self._n_joints:
-                    target_angles = angles[: self._n_joints]
-                    lo, hi = self._get_joint_limits(j)
-                    if direction == "pos":
-                        target_angles[j] = min(hi, target_angles[j] + step)
-                    else:
-                        target_angles[j] = max(lo, target_angles[j] - step)
-                    await self.client.move_j(target_angles, speed=speed, accel=accel)
+                async with self._joint_step_lock:
+                    if not self._movement_allowed(notify=False):
+                        return
+                    speed = _norm_speed()
+                    accel = _norm_accel()
+                    step = self._safe_step_value(
+                        waldoctl.commander.settings.jog.joint_step_deg
+                    )
+                    angles = list(waldoctl.commander.status.joints.angles.deg)
+                    if len(angles) >= self._n_joints:
+                        target_angles = angles[: self._n_joints]
+                        lo, hi = self._get_joint_limits(j)
+                        if direction == "pos":
+                            target_angles[j] = min(hi, target_angles[j] + step)
+                        else:
+                            target_angles[j] = max(lo, target_angles[j] - step)
+                        await self.client.move_j(
+                            target_angles,
+                            speed=speed,
+                            accel=accel,
+                            wait=True,
+                            timeout=30.0,
+                        )
             except Exception as e:
                 logger.error("Incremental joint move failed: %s", e)
 
@@ -1576,27 +1591,32 @@ class ControlPanel:
                 t.active = bool(any_pressed)
 
         async def on_click():
-            speed = _norm_speed()
-            step = self._safe_step_value(
-                waldoctl.commander.settings.jog.joint_step_deg
-            )
             try:
-                axis_letter = axis.rstrip("+-")
-                direction = 1.0 if axis.endswith("+") else -1.0
-                is_rotation = axis_letter.startswith("R")
-                # Use relative move: translation in the selected frame,
-                # rotation in TRF (matches jog_l hold behavior)
-                rel_pose = [0.0] * 6
-                if axis_letter in _AXIS_MAP:
-                    rel_pose[_AXIS_MAP[axis_letter]] = direction * step
-                    frame = frames[1] if is_rotation else self._translation_frame_name()
-                    await self.client.move_l(
-                        rel_pose,
-                        frame=frame,
-                        speed=speed,
-                        accel=_norm_accel(),
-                        rel=True,
+                async with self._cart_step_lock:
+                    if not self._movement_allowed(notify=False):
+                        return
+                    speed = _norm_speed()
+                    step = self._safe_step_value(
+                        waldoctl.commander.settings.jog.joint_step_deg
                     )
+                    axis_letter = axis.rstrip("+-")
+                    direction = 1.0 if axis.endswith("+") else -1.0
+                    is_rotation = axis_letter.startswith("R")
+                    # Use relative move: translation in the selected frame,
+                    # rotation in TRF (matches jog_l hold behavior)
+                    rel_pose = [0.0] * 6
+                    if axis_letter in _AXIS_MAP:
+                        rel_pose[_AXIS_MAP[axis_letter]] = direction * step
+                        frame = frames[1] if is_rotation else self._translation_frame_name()
+                        await self.client.move_l(
+                            rel_pose,
+                            frame=frame,
+                            speed=speed,
+                            accel=_norm_accel(),
+                            rel=True,
+                            wait=True,
+                            timeout=30.0,
+                        )
             except Exception as e:
                 logger.error("Incremental cart move failed: %s", e)
 
@@ -1890,11 +1910,11 @@ class ControlPanel:
             logger.error("HOME failed: %s", e)
 
     async def reset_to_default(self) -> None:
-        """Clear a software stop and return the robot to its calibrated standby.
+        """Clear a software stop and move to the calibrated Cartesian work pose.
 
-        If the robot is already referenced this is a normal planned move to
-        ``[0, 0, 0, 0, -130, 0]``.  If it is not referenced, the same HOME
-        command runs the owner-calibrated homing sequence first.
+        If the robot is not referenced, run the owner-calibrated HOME sequence
+        first. The work pose is intentionally away from the near-singular home
+        standby so Cartesian buttons and the TCP gizmo have a valid IK seed.
         """
         if waldoctl.commander.status.editing_mode:
             if ui_state.urdf_scene:
@@ -1904,14 +1924,25 @@ class ControlPanel:
             return
         try:
             self._clear_active_jog_inputs()
+            was_homed = bool(robot_state.homed)
             await self.client.reset()
             await asyncio.sleep(0.15)
-            index = await self.client.home()
+            if not was_homed:
+                home_index = await self.client.home(wait=True, timeout=120.0)
+                if home_index < 0:
+                    raise RuntimeError("controller rejected the homing sequence")
+            index = await self.client.move_j(
+                list(PROFILE.default_work_pose_deg),
+                speed=min(_norm_speed(), 0.25),
+                accel=min(_norm_accel(), 0.25),
+            )
             if index < 0:
                 raise RuntimeError("controller rejected the default-position move")
-            logger.info("RESET TO DEFAULT sent (standby J5=-130 degrees)")
-            motion_recorder.record_action("home")
-            ui.notify("Returning to calibrated default position", color="positive")
+            logger.info("RESET TO DEFAULT sent (Cartesian-ready owner work pose)")
+            motion_recorder.record_action(
+                "move_j", angles=list(PROFILE.default_work_pose_deg)
+            )
+            ui.notify("Moving to calibrated Cartesian-ready position", color="positive")
         except Exception as e:
             logger.error("RESET TO DEFAULT failed: %s", e)
             ui.notify(f"Reset to default failed: {e}", color="negative")
@@ -2608,8 +2639,8 @@ class ControlPanel:
                 )
                 .props("dense round unelevated color=blue-7")
                 .tooltip(
-                    "Reset software stop and return to default: "
-                    "J1-J4=0°, J5=-130°, J6=0°"
+                    "Reset software stop and move to Cartesian-ready default: "
+                    "[0°, 30°, 30°, 20°, -170°, 30°]"
                 )
                 .mark("btn-reset-default")
             )

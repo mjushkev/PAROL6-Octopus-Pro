@@ -22,6 +22,11 @@ using the measured owner profile:
 - single-click joint steps that retain motor hold without quantization-triggered
   firmware reconnects, plus stale press-state cleanup on connection loss
 - a TCP coordinate pointer that tracks WRF/TRF selection and wrist orientation
+- an interactive TCP transform gizmo with a verified runtime repair for the
+  pinned NiceGUI TransformControls event emitter
+- one 80% joint envelope across J1-J6: 36 deg/s and 96 deg/s^2
+- a calibrated Cartesian-ready default pose `[0, 30, 30, 20, -170, 30]` for
+  Reset-to-Default; Home retains the owner's J5=-130 degree standby
 - portable Windows builds of TOPP-RA and Pinokin APIs
 
 ## Model appearance
@@ -51,8 +56,9 @@ The launcher now has a hardware acceptance mode:
 It only connects to Commander firmware that proves the P6B1 capabilities and
 the exact owner-profile checksum. Commissioning firmware 0.9.1 and official
 upstream firmware are rejected before any motion command is accepted. The
-firmware keeps an independent 80% J3-J6 speed cap, lower protected J1/J2 Servo42C caps, calibrated joint limits, sensor
-guards, queue watchdog, CRC and sequence checks, graceful finish-and-hold, and
+firmware keeps an independent all-joint 80% speed and acceleration envelope,
+calibrated joint limits, sensor guards, queue watchdog, CRC and sequence checks,
+graceful finish-and-hold, and
 priority STOP.
 
 This is an acceptance build, not a completed physical release. Windows uses

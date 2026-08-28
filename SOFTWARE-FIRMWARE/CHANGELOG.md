@@ -4,9 +4,12 @@
 
 ### Added
 
-- Commander firmware `1.0.0-commander-rc6` and matching host profile raise
-  J3-J6 to the owner-requested 80% reviewed speed/acceleration stage while
-  retaining the independently proven J1/J2 Servo42C caps. Buffered USB motion
+- Commander firmware `1.0.0-commander-rc7` and matching host profile apply the
+  owner-requested 80% reviewed speed/acceleration envelope to all six joints
+  (36 deg/s and 96 deg/s^2). J1/J2 Servo42C pulse limits now match that
+  envelope, with 8 us STEP pulses and owner-profile recommendations of
+  1600 mA for J1 and 1800 mA for gravity-loaded J2; 2000 mA remains the motor
+  rating ceiling rather than the default. Buffered USB motion
   now starts with 120 ms of lookahead and refills every 40 ms, eliminating the
   zero-margin queue underruns seen during jogging. Calibrated home switches may
   clear while moving away or activate within two degrees of their home boundary;
@@ -16,9 +19,13 @@
   in-progress/blank jog step field, and keeps each jog direction enabled until
   that joint is actually at its calibrated limit. Click/hold classification now
   uses a cancellable monotonic task, so each quick press produces exactly one
-  step and a held press streams continuously until release. The default action
-  clears a software stop and returns to `[0, 0, 0, 0, -130, 0]`, running the
-  calibrated homing sequence first when the robot is not referenced.
+  step and a held press streams continuously until release. Rapid joint and
+  Cartesian step presses are serialized against completed pose feedback so no
+  click reuses and overwrites a stale target. The default action
+  clears a software stop and moves to the owner-profile Cartesian-ready pose
+  `[0, 30, 30, 20, -170, 30]`, running the calibrated homing sequence first
+  when the robot is not referenced. The Home action still ends at the owner's
+  requested `[0, 0, 0, 0, -130, 0]` standby.
 
 - Commander jog/step reliability repair: P6B1 timing-derived rates are now
   clamped to the exact calibrated firmware limits, so integer step sampling
@@ -28,6 +35,10 @@
 - The TCP coordinate pointer now follows the selected reference frame (world
   axes for WRF translation; tool axes for TRF translation and rotation) and
   refreshes orientation on wrist-only motion even when TCP XYZ is unchanged.
+- The end-effector TCP transform gizmo is interactive again. The pinned
+  NiceGUI fork attached TransformControls to `record.mesh` but emitted events
+  through an undefined variable; install now applies a fail-closed, idempotent
+  runtime repair and launch verifies it before Commander starts.
 
 - Commander firmware `1.0.0-commander-rc5` opens the owner-verified J1/J2
   active-low Servo42C interfaces only after the checksum-gated P6B1 session

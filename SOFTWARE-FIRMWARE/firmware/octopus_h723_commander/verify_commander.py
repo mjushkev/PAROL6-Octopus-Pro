@@ -41,13 +41,13 @@ def verify_firmware(source, target, env):
     protocol = (project_dir / "src" / "p6b1_protocol.cpp").read_text(encoding="utf-8")
     protocol_header = (project_dir / "include" / "p6b1_protocol.hpp").read_text(encoding="utf-8")
     platform_config = (project_dir / "platformio.ini").read_text(encoding="utf-8")
-    if 'PAROL6_FIRMWARE_VERSION="1.0.0-commander-rc6"' not in platform_config:
+    if 'PAROL6_FIRMWARE_VERSION="1.0.0-commander-rc7"' not in platform_config:
         raise RuntimeError("Commander version macro is not pinned")
     for invariant in (
         "0U, 0U, 700U, 700U, 700U, 450U", "kMaximumJogMilliDegrees = 10000",
         "kDirectionDiscoveryJogMilliDegrees = 2000",
-        "kServoMaximumPulseRate = {500.0F, 350.0F}",
-        "kJ2MaximumPulseAcceleration = 900.0F", "kServoPulseWidthUs = 1000U",
+        "kServoMaximumPulseRate = {4104.0F, 12816.0F}",
+        "kJ2MaximumPulseAcceleration = 34176.0F", "kServoPulseWidthUs = 8U",
         "kJ6SensorHomeEnabled = false",
         "kHostMotionTimeoutMs = 2000U", "j1_home=sensor_or_manual_temporary",
         "kHoldKeepaliveTimeoutMs = 400U", "kMotorHoldTimeoutMs = 2000U",
@@ -56,8 +56,8 @@ def verify_firmware(source, target, env):
         "kLimitTestInsetMilliDegrees = 10000", "LIMIT_TEST_VERIFIED",
         "kMinimumCoordinatedDurationMs = 500U",
         "kMaximumCoordinatedDurationMs = 60000U",
-        "kCoordinatedMaximumDegreesPerSecond",
-        "kCoordinatedMaximumAccelerationDegreesPerSecond2",
+        "36.0F, 36.0F, 36.0F, 36.0F, 36.0F, 36.0F",
+        "96.0F, 96.0F, 96.0F, 96.0F, 96.0F, 96.0F",
         "COORDINATED_MOVE_VERIFIED", "RELEASE_COORDINATED_HOLD_VERIFIED",
         "PAROL6_COORDINATED_STARTED", "PAROL6_COORDINATED_DONE",
         "coordinated_rate_exceeds_owner_cap",
@@ -86,7 +86,7 @@ def verify_firmware(source, target, env):
         "has_automatic_home_boundary", "apply_automatic_home_boundary",
         "guarded_axis_sensor_changed", "home_boundary_is_automatic",
         "PG6, PG10, PG12, PG11, PG9, PG13",
-        "kP6b1ProfileCrc32c = 0x9F6BC640U",
+        "kP6b1ProfileCrc32c = 0x9B9E50DAU",
         "kP6b1QueueCapacity = 512U",
         "kP6b1WatchdogMs = 250U",
         "configure_owner_servo_interfaces",

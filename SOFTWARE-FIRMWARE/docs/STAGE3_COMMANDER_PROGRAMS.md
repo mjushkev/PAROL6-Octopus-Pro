@@ -21,7 +21,8 @@ the installed `0.9.1-motion-rc` firmware and the owner-validated calibration in
 The full sequence is validated before the first command. Every target must stay
 inside the commissioned joint limits, each move uses the same synchronized
 acceleration-limited duration calculation as single-pose motion, and the
-firmware independently enforces its calibrated limits, the 80% J3-J6 coordinated cap, and the lower validated J1/J2 Servo42C caps.
+firmware independently enforces its calibrated limits and the matched 80%
+velocity/acceleration envelope on every joint.
 
 ## Program behavior
 

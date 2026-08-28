@@ -464,6 +464,13 @@ def test_env_config() -> Generator[None, None, None]:
     These are only set if not already present in the environment.
     """
     controller_port, multicast_port = _get_test_ports()
+    # parol6.config is imported near the top of this module so its constants
+    # already exist before fixtures run. Keep the in-process clients on the
+    # same randomized port that the controller subprocess receives via env.
+    import parol6.config as parol6_config
+
+    original_mcast_port = parol6_config.MCAST_PORT
+    parol6_config.MCAST_PORT = multicast_port
     env_defaults: dict[str, str] = {
         "PAROL6_FAKE_SERIAL": "1",  # Use fake serial for controller
         "WALDO_WEBAPP_REQUIRE_READY": "1",
@@ -471,7 +478,7 @@ def test_env_config() -> Generator[None, None, None]:
         "WALDO_LOG_LEVEL": "DEBUG",
         # Connect webapp to the session-randomized controller port
         "WALDO_CONTROLLER_PORT": str(controller_port),
-        "PAROL6_STATUS_MULTICAST_PORT": str(multicast_port),
+        "PAROL6_MCAST_PORT": str(multicast_port),
         # Skip slow envelope generation by default (tests that need it enable explicitly)
         "WALDO_SKIP_ENVELOPE": "1",
         # Reduce status broadcast rate for tests (50Hz is for human-perceived real-time,
@@ -488,6 +495,7 @@ def test_env_config() -> Generator[None, None, None]:
     try:
         yield
     finally:
+        parol6_config.MCAST_PORT = original_mcast_port
         for key, original_val in originals.items():
             if original_val is None:
                 os.environ.pop(key, None)
@@ -674,7 +682,7 @@ def session_controller(
         normalize_logs=True,
     )
     robot.start(
-        extra_env={"PAROL6_STATUS_MULTICAST_PORT": str(multicast_port)},
+        extra_env={"PAROL6_MCAST_PORT": str(multicast_port)},
     )
 
     try:

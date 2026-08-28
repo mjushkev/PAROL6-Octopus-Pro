@@ -22,7 +22,7 @@ from scipy.spatial.transform import Rotation
 PROFILE_SCHEMA = "parol6.production-calibration.v1"
 EXPECTED_ROBOT_ID = "PAROL6-MATTJ-001"
 EXPECTED_BOARD = "BTT_OCTOPUS_PRO_V1_1_H723ZE"
-BUNDLED_PROFILE_SHA256 = "f9cd6edd6352d63a907e649540ead50ce08728db8bd254c65568378d428fecec"
+BUNDLED_PROFILE_SHA256 = "60040102597e6a67dcc8f48aa38856046629724aec4b8edb207cb78b3b451553"
 
 # q_urdf = MODEL_SIGN * q_owner + MODEL_ZERO_OFFSET_DEG
 # J1 assumes the owner-selected manual zero is the standard 90-degree standby.
@@ -35,10 +35,11 @@ MODEL_ZERO_OFFSET_DEG = np.array(
 )
 MODEL_MAPPING_STATUS = "derived_pending_physical_pose_validation"
 
-# Owner-selected 80% commissioning stage. J1/J2 remain capped at their
-# separately proven Servo42C pulse rates; J3-J6 use 80% of the reviewed rates.
-COMMISSIONING_MAX_DEG_S = np.array([4.0, 1.0, 36.0, 36.0, 36.0, 36.0])
-COMMISSIONING_MAX_DEG_S2 = np.array([8.0, 2.5, 96.0, 96.0, 96.0, 96.0])
+# Owner-selected 80% motion stage: all six joints use 80% of the reviewed
+# 45 deg/s and 120 deg/s^2 reference envelope. Firmware independently enforces
+# the same absolute per-joint limits.
+COMMISSIONING_MAX_DEG_S = np.full(6, 36.0, dtype=np.float64)
+COMMISSIONING_MAX_DEG_S2 = np.full(6, 96.0, dtype=np.float64)
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,7 @@ class HardwareProfile:
     j1_home_mode_default: str
     j1_auto_home_available: bool
     home_order: tuple[str, ...]
+    default_work_pose_deg: tuple[float, ...]
     joints: tuple[JointProfile, ...]
 
     @property
@@ -130,6 +132,26 @@ def load_profile(path: Path | None = None) -> HardwareProfile:
     speed_cap = int(motion.get("initial_speed_cap_percent", 0))
     if not 1 <= speed_cap <= 100:
         raise ValueError("initial_speed_cap_percent must be in 1..100")
+    expected_full_speed = [45] * 6
+    expected_full_acceleration = [120] * 6
+    expected_stage_speed = COMMISSIONING_MAX_DEG_S.tolist()
+    expected_stage_acceleration = COMMISSIONING_MAX_DEG_S2.tolist()
+    if motion.get("reviewed_full_joint_velocity_deg_s") != expected_full_speed:
+        raise ValueError("reviewed full joint velocity envelope changed")
+    if motion.get("reviewed_full_joint_acceleration_deg_s2") != expected_full_acceleration:
+        raise ValueError("reviewed full joint acceleration envelope changed")
+    if motion.get("commissioning_joint_velocity_deg_s") != expected_stage_speed:
+        raise ValueError("Commander joint velocity envelope does not match the 80% stage")
+    if motion.get("commissioning_joint_acceleration_deg_s2") != expected_stage_acceleration:
+        raise ValueError("Commander joint acceleration envelope does not match the 80% stage")
+    if motion.get("servo42c_recommended_ma") != {"J1": 1600, "J2": 1800}:
+        raise ValueError("Servo42C current recommendation changed")
+    work_pose = tuple(float(value) for value in motion.get("default_work_pose_deg", []))
+    if len(work_pose) != 6:
+        raise ValueError("default_work_pose_deg must contain six joint angles")
+    for index, value in enumerate(work_pose):
+        if not joints[index].minimum_deg <= value <= joints[index].maximum_deg:
+            raise ValueError(f"default work pose exceeds J{index + 1} limits")
     return HardwareProfile(
         path=source,
         robot_id=data["robot_id"],
@@ -139,6 +161,7 @@ def load_profile(path: Path | None = None) -> HardwareProfile:
         j1_home_mode_default=motion.get("j1_home_mode_default", "MANUAL"),
         j1_auto_home_available=bool(motion.get("j1_auto_home_available", False)),
         home_order=tuple(motion.get("home_order", [])),
+        default_work_pose_deg=work_pose,
         joints=joints,
     )
 

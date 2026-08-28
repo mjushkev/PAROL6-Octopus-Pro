@@ -187,11 +187,12 @@ def test_joint_sensor_bits_never_alias_the_physical_estop() -> None:
 def test_timing_quantization_never_exceeds_firmware_speed_limits() -> None:
     transport = OctopusBufferedTransport(port="FAKE")
     previous = (0, 0, 0, 0, 0, 0)
-    # At 100 Hz, these deltas derive to 500 steps/s. That is above J1/J2's
-    # configured validator limits even though the planner's average trajectory
-    # remains within its calibrated degrees-per-second cap.
+    # At 100 Hz, choose one-sample deltas above each axis-specific firmware
+    # ceiling. Integer trajectory sampling must never inflate the transmitted
+    # max-speed field beyond the matched 80% envelope.
+    deltas = tuple(limit // 100 + 2 for limit in transport.SPEED_LIMITS_STEPS_S)
     point = Setpoint(
-        positions_steps=(5, 5, 5, 5, 5, 5),
+        positions_steps=deltas,
         speeds_steps_s=(200, 200, 200, 200, 200, 200),
         io_bits=0,
         command=int(CommandCode.MOVE),
@@ -199,9 +200,7 @@ def test_timing_quantization_never_exceeds_firmware_speed_limits() -> None:
 
     bounded = transport._bounded_timed_setpoint(point, previous)
 
-    assert bounded.speeds_steps_s[0] == transport.SPEED_LIMITS_STEPS_S[0]
-    assert bounded.speeds_steps_s[1] == transport.SPEED_LIMITS_STEPS_S[1]
-    assert bounded.speeds_steps_s[2:] == (500, 500, 500, 500)
+    assert bounded.speeds_steps_s == transport.SPEED_LIMITS_STEPS_S
     assert all(
         speed <= limit
         for speed, limit in zip(

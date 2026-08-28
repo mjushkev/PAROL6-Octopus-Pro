@@ -35,9 +35,10 @@ def test_owner_profile_is_loaded_exactly() -> None:
     )
     np.testing.assert_array_equal(PROFILE.pulses_per_degree, [114, 356, 161, 36, 36, 89])
     np.testing.assert_allclose(PROFILE.standby_deg, [0, 0, 0, 0, -130, 0])
+    np.testing.assert_allclose(PROFILE.default_work_pose_deg, [0, 30, 30, 20, -170, 30])
     assert PROFILE.initial_speed_cap_percent == 80
-    np.testing.assert_allclose(COMMISSIONING_MAX_DEG_S, [4, 1, 36, 36, 36, 36])
-    np.testing.assert_allclose(COMMISSIONING_MAX_DEG_S2, [8, 2.5, 96, 96, 96, 96])
+    np.testing.assert_allclose(COMMISSIONING_MAX_DEG_S, [36, 36, 36, 36, 36, 36])
+    np.testing.assert_allclose(COMMISSIONING_MAX_DEG_S2, [96, 96, 96, 96, 96, 96])
 
 
 def test_effective_step_conversion_matches_measured_profile() -> None:

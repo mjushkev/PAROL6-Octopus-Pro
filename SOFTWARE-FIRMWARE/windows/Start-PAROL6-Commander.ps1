@@ -13,6 +13,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $apiRoot = Join-Path $PSScriptRoot "parol6_api_octopus"
 $commanderRoot = Join-Path $PSScriptRoot "waldo_commander"
+$niceguiPatch = Join-Path $PSScriptRoot "runtime_patches\patch_nicegui_scene.py"
 $runtimeRoot = Join-Path $env:USERPROFILE ".cache\parol6-waldo"
 $python = Join-Path $runtimeRoot ".venv\Scripts\python.exe"
 $profile = Join-Path $projectRoot "config\robot.mattj.calibrated.json"
@@ -22,6 +23,10 @@ if (-not (Test-Path -LiteralPath $python)) {
 }
 if (-not (Test-Path -LiteralPath $profile)) {
     throw "The owner calibration profile is missing: $profile"
+}
+& $python $niceguiPatch --check
+if ($LASTEXITCODE -ne 0) {
+    throw "The NiceGUI TransformControls runtime patch is missing. Run Install-PAROL6-Commander.ps1."
 }
 New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
 $legacyStorage = Join-Path $commanderRoot ".nicegui\storage-general.json"
@@ -113,7 +118,7 @@ if (-not $NoBrowser) {
 Write-Host "PAROL6 Commander is running at $url"
 Write-Host "Robot profile: PAROL6-MATTJ-001"
 if ($Mode -eq "Hardware") {
-    Write-Host "Hardware mode: $ComPort, checksum-gated P6B1 transport, 80% motion stage with protected J1/J2 Servo42C caps."
+    Write-Host "Hardware mode: $ComPort, checksum-gated P6B1 transport, all-joint 80% motion envelope."
     Write-Warning "Physical collision checking is not yet available on this Windows runtime. Use no tool, clear the work area, and keep the main-power E-stop within reach during acceptance testing."
 } else {
     Write-Host "Mode: safe simulator (no physical motion)."

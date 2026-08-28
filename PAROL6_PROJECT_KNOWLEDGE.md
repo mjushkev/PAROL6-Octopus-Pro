@@ -122,6 +122,19 @@ polling, display, and encoder-dependent faulting are disabled. The encoder data
 model and dormant integration code remain in the software so a future,
 hardware-qualified re-enable does not require a protocol redesign.
 
+**Owner Commander amendment — 2026-08-27:** Commander RC7 applies the same
+reviewed 80% motion envelope to J1-J6: 36 joint degrees/s and 96 joint
+degrees/s^2, derived from the reviewed full envelope of 45 degrees/s and
+120 degrees/s^2. The firmware enforces these as hard maxima; the Commander
+speed percentage scales within them. The owner Cartesian-ready default work
+pose is `[0, 30, 30, 20, -170, 30]` degrees. `HOME` still ends at the
+owner-calibrated standby pose `[0, 0, 0, 0, -130, 0]`, while Reset to Default
+homes if necessary and then moves to the work pose to avoid the standby's
+near-singular Cartesian seed. The open-loop Servo42C starting currents are
+J1 `Ma=1600 mA` and gravity-loaded J2 `Ma=1800 mA`; 2000 mA is the installed
+motor's per-phase ceiling, not the sustained default. The live hardware must
+not connect until matching RC7 firmware and its profile CRC are installed.
+
 The upstream PAROL6 production firmware targets the custom STM32F446RE PAROL
 control board with six TMC5160 drivers, so its pin map, SPI driver setup, enable
 logic, current configuration, homing behavior, and packet implementation are

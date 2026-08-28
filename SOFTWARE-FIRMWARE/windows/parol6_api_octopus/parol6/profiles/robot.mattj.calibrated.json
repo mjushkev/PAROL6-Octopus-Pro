@@ -13,6 +13,12 @@
     "servo42c_mode": "CR_OPEN",
     "encoder_integration": false,
     "initial_speed_cap_percent": 80,
+    "reviewed_full_joint_velocity_deg_s": [45, 45, 45, 45, 45, 45],
+    "reviewed_full_joint_acceleration_deg_s2": [120, 120, 120, 120, 120, 120],
+    "commissioning_joint_velocity_deg_s": [36, 36, 36, 36, 36, 36],
+    "commissioning_joint_acceleration_deg_s2": [96, 96, 96, 96, 96, 96],
+    "servo42c_recommended_ma": {"J1": 1600, "J2": 1800},
+    "default_work_pose_deg": [0, 30, 30, 20, -170, 30],
     "j1_home_mode_default": "MANUAL",
     "j1_auto_home_available": true,
     "home_order": ["J1", "J2", "J3", "J4", "J6", "J5"]

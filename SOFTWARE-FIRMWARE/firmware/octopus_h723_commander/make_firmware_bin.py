@@ -59,10 +59,10 @@ def main() -> int:
     digest = hashlib.sha256(binary).hexdigest()
     manifest = {
         "schema": "parol6.firmware-release.v1",
-        "firmware": "1.0.0-commander-rc6",
+        "firmware": "1.0.0-commander-rc7",
         "board": "BTT_OCTOPUS_PRO_V1_1_H723ZE",
         "application_origin": "0x08020000",
-        "owner_profile_crc32c": "0x9F6BC640",
+        "owner_profile_crc32c": "0x9B9E50DA",
         "size_bytes": len(binary),
         "sha256": digest,
         "sd_filename": "firmware.bin",

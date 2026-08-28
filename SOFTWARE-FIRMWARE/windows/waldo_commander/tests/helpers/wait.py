@@ -300,6 +300,7 @@ async def wait_for_value_change(
     get_value_fn: Callable[[], float],
     timeout_s: float = 1.0,
     min_delta: float = 0.05,
+    baseline: float | None = None,
 ) -> float:
     """Wait for a value to change from its initial reading.
 
@@ -310,6 +311,7 @@ async def wait_for_value_change(
         get_value_fn: Callable returning current value to monitor
         timeout_s: Maximum time to wait
         min_delta: Minimum change required to consider "started"
+        baseline: Optional value captured before the event was dispatched
 
     Returns:
         The new value after change detected
@@ -317,7 +319,8 @@ async def wait_for_value_change(
     Raises:
         TimeoutError: If no change detected within timeout
     """
-    baseline = get_value_fn()
+    if baseline is None:
+        baseline = get_value_fn()
     interval = 0.05
     for _ in range(int(timeout_s / interval)):
         await asyncio.sleep(interval)
@@ -330,13 +333,13 @@ async def wait_for_value_change(
     )
 
 
-JOG_SAFE_POSE_DEG = [85.0, -85.0, 135.0, 10.0, 45.0, 170.0]
+JOG_SAFE_POSE_DEG = [0.0, 30.0, 30.0, 20.0, -170.0, 30.0]
 
 
 async def teleport_to_jog_pose(client, timeout_s: float = 10.0) -> None:
     """Teleport to a singularity-free pose and wait for the full vector to land.
 
-    The controller's standby/home pose has J5 = 0 — a wrist singularity where
+    The owner's standby/home pose maps close to a wrist singularity where
     a straight-line cartesian step can fail IK for most of its path (partial
     creep-length moves, refusals, controller ERROR). Cartesian jog tests must
     start away from it. Gate on the full joint vector: single joints often
